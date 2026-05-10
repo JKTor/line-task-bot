@@ -1,18 +1,20 @@
-"""Use Gemini to translate free-form Thai messages into structured intents
-that the existing handler can dispatch."""
+"""Translate free-form Thai messages into structured intents.
+
+Tries providers in order:
+  1. Groq (free, no region restriction) — preferred
+  2. Google Gemini (if GROQ unavailable in some region)
+"""
 import json
 import os
 from datetime import datetime
 from typing import Any, Dict
 
-import google.generativeai as genai
 import pytz
 
 TZ = pytz.timezone("Asia/Bangkok")
 
-_API_KEY = os.getenv("GEMINI_API_KEY", "")
-if _API_KEY:
-    genai.configure(api_key=_API_KEY)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 SYSTEM_PROMPT = """คุณคือผู้ช่วยแปลงข้อความภาษาไทย/อังกฤษ ให้เป็น JSON สำหรับจัดการ to-do list
 ตอบเป็น JSON อย่างเดียว ห้ามมี markdown หรือ code fence
@@ -34,7 +36,7 @@ Schema:
 - intent="done"/"delete" ต้องมี task_id
 
 ตัวอย่าง:
-"พรุ่งนี้ส่งรายงาน 6 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<DATE+1> 18:00"}]}
+"พรุ่งนี้ส่งรายงาน 6 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<วันพรุ่งนี้> 18:00"}]}
 "วันนี้มีอะไรบ้าง" → {"intent":"list_today"}
 "งานทั้งหมด" → {"intent":"list_all"}
 "งาน 3 เสร็จแล้ว" → {"intent":"done","task_id":3}
@@ -44,66 +46,100 @@ Schema:
 
 
 def is_enabled() -> bool:
-    return bool(_API_KEY)
-
-
-_MODEL_CANDIDATES = (
-    "gemini-2.5-flash-lite",   # most generous free tier (1000 req/day)
-    "gemini-2.0-flash-lite",   # 200 req/day
-    "gemini-2.5-flash",        # 250 req/day
-    "gemini-1.5-flash",        # legacy fallback
-)
+    return bool(GROQ_API_KEY or GEMINI_API_KEY)
 
 
 def _strip_json_fence(s: str) -> str:
     s = (s or "").strip()
     if s.startswith("```"):
-        # remove ```json or ``` opening, and trailing ```
         s = s.split("\n", 1)[1] if "\n" in s else s
         if s.endswith("```"):
             s = s[: -3]
     return s.strip()
 
 
-def parse(text: str) -> Dict[str, Any]:
-    """Return parsed intent dict. Falls back to {'intent':'unknown'} on any error."""
-    if not _API_KEY:
-        return {"intent": "unknown", "reply": "AI parser ยังไม่ได้ตั้งค่า GEMINI_API_KEY"}
-
+def _build_user_prompt(text: str) -> str:
     now = datetime.now(TZ)
-    user_prompt = (
-        f"{SYSTEM_PROMPT}\n\n"
+    return (
         f"ปัจจุบัน: {now.strftime('%A %Y-%m-%d %H:%M')} (Asia/Bangkok)\n"
         f"ข้อความผู้ใช้: {text}\n\n"
         f"ตอบเป็น JSON เท่านั้น:"
     )
 
-    print(f"[ai_parser] candidates={_MODEL_CANDIDATES}")
+
+def _try_groq(text: str) -> Dict[str, Any]:
+    from groq import Groq
+
+    client = Groq(api_key=GROQ_API_KEY)
+    models = ("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it")
     last_err = None
     last_model = None
-    for model_name in _MODEL_CANDIDATES:
+    for model_name in models:
         last_model = model_name
         try:
-            print(f"[ai_parser] trying {model_name}")
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                generation_config={"temperature": 0.2},
+            print(f"[ai_parser/groq] trying {model_name}")
+            resp = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": _build_user_prompt(text)},
+                ],
+                temperature=0.2,
+                response_format={"type": "json_object"},
             )
-            resp = model.generate_content(user_prompt)
-            raw = _strip_json_fence(getattr(resp, "text", "") or "")
-            if not raw:
-                last_err = "empty response"
-                continue
+            raw = _strip_json_fence(resp.choices[0].message.content or "")
             data = json.loads(raw)
             if not isinstance(data, dict) or "intent" not in data:
                 last_err = f"bad shape: {raw[:200]}"
                 continue
-            print(f"[ai_parser] success with {model_name}")
+            print(f"[ai_parser/groq] success with {model_name}")
             return data
         except Exception as e:
             last_err = f"{type(e).__name__}: {str(e)[:150]}"
-            print(f"[ai_parser] {model_name} failed: {last_err}")
+            print(f"[ai_parser/groq] {model_name} failed: {last_err}")
             continue
+    return {"intent": "unknown", "reply": f"AI ขัดข้อง (groq/{last_model}): {last_err[:200] if last_err else ''}"}
 
-    print(f"[ai_parser] all models failed. last_model={last_model} last_err={last_err}")
-    return {"intent": "unknown", "reply": f"AI ขัดข้อง ({last_model}): {last_err[:200] if last_err else ''}"}
+
+def _try_gemini(text: str) -> Dict[str, Any]:
+    import google.generativeai as genai
+
+    genai.configure(api_key=GEMINI_API_KEY)
+    models = ("gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.5-flash")
+    last_err = None
+    last_model = None
+    for model_name in models:
+        last_model = model_name
+        try:
+            print(f"[ai_parser/gemini] trying {model_name}")
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                generation_config={"temperature": 0.2},
+            )
+            resp = model.generate_content(SYSTEM_PROMPT + "\n\n" + _build_user_prompt(text))
+            raw = _strip_json_fence(getattr(resp, "text", "") or "")
+            data = json.loads(raw)
+            if not isinstance(data, dict) or "intent" not in data:
+                last_err = f"bad shape: {raw[:200]}"
+                continue
+            print(f"[ai_parser/gemini] success with {model_name}")
+            return data
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {str(e)[:150]}"
+            print(f"[ai_parser/gemini] {model_name} failed: {last_err}")
+            continue
+    return {"intent": "unknown", "reply": f"AI ขัดข้อง (gemini/{last_model}): {last_err[:200] if last_err else ''}"}
+
+
+def parse(text: str) -> Dict[str, Any]:
+    """Return parsed intent dict. Tries Groq first, then Gemini."""
+    if GROQ_API_KEY:
+        result = _try_groq(text)
+        if result.get("intent") != "unknown" or not GEMINI_API_KEY:
+            return result
+        # else fall through to Gemini
+
+    if GEMINI_API_KEY:
+        return _try_gemini(text)
+
+    return {"intent": "unknown", "reply": "AI parser ยังไม่ได้ตั้งค่า GROQ_API_KEY หรือ GEMINI_API_KEY"}
