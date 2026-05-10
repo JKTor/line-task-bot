@@ -47,7 +47,12 @@ def is_enabled() -> bool:
     return bool(_API_KEY)
 
 
-_MODEL_CANDIDATES = ("gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-2.0-flash")
+_MODEL_CANDIDATES = (
+    "gemini-2.5-flash-lite",   # most generous free tier (1000 req/day)
+    "gemini-2.0-flash-lite",   # 200 req/day
+    "gemini-2.5-flash",        # 250 req/day
+    "gemini-1.5-flash",        # legacy fallback
+)
 
 
 def _strip_json_fence(s: str) -> str:
