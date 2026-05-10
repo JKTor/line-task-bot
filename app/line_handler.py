@@ -124,6 +124,10 @@ def _done_all(db: Session, user_id: str) -> str:
 
 # ===== Strict pattern matcher =====
 
+_THAI_TIME_WORDS = ("ทุ่ม", "บ่าย", "เย็น", "ตี ", "ตี1", "ตี2", "ตี3", "ตี4", "ตี5",
+                    "เช้า", "เที่ยง", "ค่ำ", "ดึก", "สาย", "โมง")
+
+
 def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
     lower = text.lower()
 
@@ -131,6 +135,9 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
         body = text[len("เพิ่ม"):].strip() if text.startswith("เพิ่ม") else text[4:].strip()
         if not body:
             return "พิมพ์ชื่องานด้วยนะครับ\nเช่น: เพิ่ม ส่งรายงาน พรุ่งนี้ 18:00"
+        # If user uses Thai time words regex can't parse, defer to AI
+        if any(w in body for w in _THAI_TIME_WORDS) and ai_parser.is_enabled():
+            return None
         title, deadline = parse_task(body)
         if not title:
             return "ไม่เจอชื่องาน ลองพิมพ์ใหม่นะครับ"
