@@ -48,6 +48,16 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/debug/ai")
+def debug_ai():
+    return {
+        "groq_set": bool(os.getenv("GROQ_API_KEY")),
+        "gemini_set": bool(os.getenv("GEMINI_API_KEY")),
+        "line_secret_set": bool(os.getenv("LINE_CHANNEL_SECRET")),
+        "line_token_set": bool(os.getenv("LINE_CHANNEL_ACCESS_TOKEN")),
+    }
+
+
 @app.post("/webhook")
 async def webhook(request: Request, x_line_signature: str = Header(None), db: Session = Depends(get_db)):
     if parser is None or line_config is None:
