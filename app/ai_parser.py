@@ -78,9 +78,13 @@ def parse(text: str) -> Dict[str, Any]:
         f"ตอบเป็น JSON เท่านั้น:"
     )
 
+    print(f"[ai_parser] candidates={_MODEL_CANDIDATES}")
     last_err = None
+    last_model = None
     for model_name in _MODEL_CANDIDATES:
+        last_model = model_name
         try:
+            print(f"[ai_parser] trying {model_name}")
             model = genai.GenerativeModel(
                 model_name=model_name,
                 generation_config={"temperature": 0.2},
@@ -94,11 +98,12 @@ def parse(text: str) -> Dict[str, Any]:
             if not isinstance(data, dict) or "intent" not in data:
                 last_err = f"bad shape: {raw[:200]}"
                 continue
+            print(f"[ai_parser] success with {model_name}")
             return data
         except Exception as e:
-            last_err = f"{type(e).__name__}: {e}"
+            last_err = f"{type(e).__name__}: {str(e)[:150]}"
             print(f"[ai_parser] {model_name} failed: {last_err}")
             continue
 
-    print(f"[ai_parser] all models failed. last_err={last_err}")
-    return {"intent": "unknown", "reply": f"AI ขัดข้อง: {last_err}"}
+    print(f"[ai_parser] all models failed. last_model={last_model} last_err={last_err}")
+    return {"intent": "unknown", "reply": f"AI ขัดข้อง ({last_model}): {last_err[:200] if last_err else ''}"}
