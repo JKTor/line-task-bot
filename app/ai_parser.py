@@ -47,6 +47,19 @@ def is_enabled() -> bool:
     return bool(_API_KEY)
 
 
+_MODEL_CANDIDATES = ("gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-2.0-flash")
+
+
+def _strip_json_fence(s: str) -> str:
+    s = (s or "").strip()
+    if s.startswith("```"):
+        # remove ```json or ``` opening, and trailing ```
+        s = s.split("\n", 1)[1] if "\n" in s else s
+        if s.endswith("```"):
+            s = s[: -3]
+    return s.strip()
+
+
 def parse(text: str) -> Dict[str, Any]:
     """Return parsed intent dict. Falls back to {'intent':'unknown'} on any error."""
     if not _API_KEY:
@@ -54,23 +67,33 @@ def parse(text: str) -> Dict[str, Any]:
 
     now = datetime.now(TZ)
     user_prompt = (
+        f"{SYSTEM_PROMPT}\n\n"
         f"ปัจจุบัน: {now.strftime('%A %Y-%m-%d %H:%M')} (Asia/Bangkok)\n"
-        f"ข้อความ: {text}"
+        f"ข้อความผู้ใช้: {text}\n\n"
+        f"ตอบเป็น JSON เท่านั้น:"
     )
-    try:
-        model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
-            system_instruction=SYSTEM_PROMPT,
-            generation_config={
-                "response_mime_type": "application/json",
-                "temperature": 0.2,
-            },
-        )
-        resp = model.generate_content(user_prompt)
-        data = json.loads(resp.text or "{}")
-        if not isinstance(data, dict) or "intent" not in data:
-            return {"intent": "unknown"}
-        return data
-    except Exception as e:
-        print(f"[ai_parser] error: {e}")
-        return {"intent": "unknown", "reply": "AI ขัดข้อง ลองใหม่อีกครั้ง"}
+
+    last_err = None
+    for model_name in _MODEL_CANDIDATES:
+        try:
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                generation_config={"temperature": 0.2},
+            )
+            resp = model.generate_content(user_prompt)
+            raw = _strip_json_fence(getattr(resp, "text", "") or "")
+            if not raw:
+                last_err = "empty response"
+                continue
+            data = json.loads(raw)
+            if not isinstance(data, dict) or "intent" not in data:
+                last_err = f"bad shape: {raw[:200]}"
+                continue
+            return data
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            print(f"[ai_parser] {model_name} failed: {last_err}")
+            continue
+
+    print(f"[ai_parser] all models failed. last_err={last_err}")
+    return {"intent": "unknown", "reply": f"AI ขัดข้อง: {last_err}"}
