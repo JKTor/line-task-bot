@@ -21,7 +21,7 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยแปลงข้อ�
 
 Schema:
 {
-  "intent": "add" | "list_today" | "list_all" | "done" | "delete" | "help" | "unknown",
+  "intent": "add" | "list_today" | "list_all" | "done" | "delete" | "delete_all" | "done_all" | "help" | "unknown",
   "tasks": [{"title": "string", "deadline": "YYYY-MM-DD HH:MM" or null}],
   "task_id": integer or null,
   "reply": "ข้อความตอบกลับสั้นๆ เป็นมิตร (optional)"
@@ -55,6 +55,9 @@ Schema:
 "งานทั้งหมด" → {"intent":"list_all"}
 "งาน 3 เสร็จแล้ว" → {"intent":"done","task_id":3}
 "ลบงานที่ 2" → {"intent":"delete","task_id":2}
+"ลบทั้งหมด" / "ลบงานทั้งหมด" → {"intent":"delete_all"}
+"เคลียร์งานหมดเลย" → {"intent":"delete_all"}
+"ปิดงานทั้งหมด" / "เสร็จหมดแล้ว" → {"intent":"done_all"}
 "ช่วยอะไรได้บ้าง" → {"intent":"help"}
 """
 
@@ -81,15 +84,13 @@ def _build_user_prompt(text: str) -> str:
     )
 
 
-def _try_groq(text: str) -> Dict[str, Any]:
+def _try_groq(text: str):
+    """Return parsed dict on any successful model call, else None on total failure."""
     from groq import Groq
 
     client = Groq(api_key=GROQ_API_KEY)
     models = ("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it")
-    last_err = None
-    last_model = None
     for model_name in models:
-        last_model = model_name
         try:
             print(f"[ai_parser/groq] trying {model_name}")
             resp = client.chat.completions.create(
@@ -104,26 +105,23 @@ def _try_groq(text: str) -> Dict[str, Any]:
             raw = _strip_json_fence(resp.choices[0].message.content or "")
             data = json.loads(raw)
             if not isinstance(data, dict) or "intent" not in data:
-                last_err = f"bad shape: {raw[:200]}"
                 continue
             print(f"[ai_parser/groq] success with {model_name}")
             return data
         except Exception as e:
-            last_err = f"{type(e).__name__}: {str(e)[:150]}"
-            print(f"[ai_parser/groq] {model_name} failed: {last_err}")
+            print(f"[ai_parser/groq] {model_name} failed: {type(e).__name__}: {str(e)[:150]}")
             continue
-    return {"intent": "unknown", "reply": f"AI ขัดข้อง (groq/{last_model}): {last_err[:200] if last_err else ''}"}
+    print("[ai_parser/groq] all groq models failed")
+    return None
 
 
-def _try_gemini(text: str) -> Dict[str, Any]:
+def _try_gemini(text: str):
+    """Return parsed dict on any successful model call, else None on total failure."""
     import google.generativeai as genai
 
     genai.configure(api_key=GEMINI_API_KEY)
     models = ("gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.5-flash")
-    last_err = None
-    last_model = None
     for model_name in models:
-        last_model = model_name
         try:
             print(f"[ai_parser/gemini] trying {model_name}")
             model = genai.GenerativeModel(
@@ -134,26 +132,27 @@ def _try_gemini(text: str) -> Dict[str, Any]:
             raw = _strip_json_fence(getattr(resp, "text", "") or "")
             data = json.loads(raw)
             if not isinstance(data, dict) or "intent" not in data:
-                last_err = f"bad shape: {raw[:200]}"
                 continue
             print(f"[ai_parser/gemini] success with {model_name}")
             return data
         except Exception as e:
-            last_err = f"{type(e).__name__}: {str(e)[:150]}"
-            print(f"[ai_parser/gemini] {model_name} failed: {last_err}")
+            print(f"[ai_parser/gemini] {model_name} failed: {type(e).__name__}: {str(e)[:150]}")
             continue
-    return {"intent": "unknown", "reply": f"AI ขัดข้อง (gemini/{last_model}): {last_err[:200] if last_err else ''}"}
+    print("[ai_parser/gemini] all gemini models failed")
+    return None
 
 
 def parse(text: str) -> Dict[str, Any]:
-    """Return parsed intent dict. Tries Groq first, then Gemini."""
+    """Return parsed intent dict. Tries Groq first, then Gemini.
+    Falls through to next provider only if the current one totally failed (None)."""
     if GROQ_API_KEY:
         result = _try_groq(text)
-        if result.get("intent") != "unknown" or not GEMINI_API_KEY:
+        if result is not None:
             return result
-        # else fall through to Gemini
 
     if GEMINI_API_KEY:
-        return _try_gemini(text)
+        result = _try_gemini(text)
+        if result is not None:
+            return result
 
-    return {"intent": "unknown", "reply": "AI parser ยังไม่ได้ตั้งค่า GROQ_API_KEY หรือ GEMINI_API_KEY"}
+    return {"intent": "unknown", "reply": "AI ไม่พร้อมใช้งานชั่วคราว"}

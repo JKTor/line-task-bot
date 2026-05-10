@@ -106,6 +106,22 @@ def _delete_task(db: Session, user_id: str, task_id: int) -> str:
     return f"🗑️ ลบแล้ว: #{task_id}"
 
 
+def _delete_all(db: Session, user_id: str) -> str:
+    n = db.query(Task).filter_by(user_id=user_id).delete()
+    db.commit()
+    return f"🗑️ ลบงานทั้งหมดแล้ว ({n} รายการ)" if n else "ไม่มีงานให้ลบ"
+
+
+def _done_all(db: Session, user_id: str) -> str:
+    n = (
+        db.query(Task)
+        .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+        .update({Task.done: True})
+    )
+    db.commit()
+    return f"🎉 ปิดงานทั้งหมดแล้ว ({n} รายการ)" if n else "ไม่มีงานที่ค้างอยู่"
+
+
 # ===== Strict pattern matcher =====
 
 def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
@@ -193,6 +209,12 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
         if isinstance(tid, int):
             return _delete_task(db, user_id, tid)
         return "บอก id งานที่จะลบด้วยนะครับ เช่น 'ลบ 3'"
+
+    if action == "delete_all":
+        return _delete_all(db, user_id)
+
+    if action == "done_all":
+        return _done_all(db, user_id)
 
     if action == "help":
         return HELP_TEXT
