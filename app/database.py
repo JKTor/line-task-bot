@@ -1,6 +1,7 @@
 import os
+import time
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./tasks.db")
@@ -24,6 +25,17 @@ def get_db():
         db.close()
 
 
-def init_db():
+def init_db(retries: int = 5, delay: float = 2.0) -> None:
     from app import models  # noqa: F401
-    Base.metadata.create_all(bind=engine)
+    for attempt in range(1, retries + 1):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            Base.metadata.create_all(bind=engine)
+            print(f"[init_db] connected on attempt {attempt}")
+            return
+        except Exception as e:
+            print(f"[init_db] attempt {attempt}/{retries} failed: {e}")
+            if attempt < retries:
+                time.sleep(delay)
+    print("[init_db] WARNING: could not connect to DB, continuing anyway")
