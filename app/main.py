@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db, init_db
 from app.line_handler import handle_command
-from app.scheduler import check_and_send_reminders
+from app.scheduler import check_and_send_reminders, send_morning_summary
 
 load_dotenv()
 
@@ -55,6 +55,7 @@ def debug_ai():
         "gemini_set": bool(os.getenv("GEMINI_API_KEY")),
         "line_secret_set": bool(os.getenv("LINE_CHANNEL_SECRET")),
         "line_token_set": bool(os.getenv("LINE_CHANNEL_ACCESS_TOKEN")),
+        "line_user_id_set": bool(os.getenv("LINE_USER_ID")),
     }
 
 
@@ -105,3 +106,16 @@ def cron_check(secret: str = ""):
         raise HTTPException(500, "LINE access token not configured")
     sent = check_and_send_reminders(CHANNEL_ACCESS_TOKEN)
     return {"ok": True, "reminders_sent": sent}
+
+
+@app.get("/cron/morning")
+def cron_morning(secret: str = ""):
+    """Morning summary endpoint. Call daily at 01:00 UTC (08:00 Bangkok).
+    URL: https://your-app.onrender.com/cron/morning?secret=YOUR_CRON_SECRET
+    """
+    if not CRON_SECRET or secret != CRON_SECRET:
+        raise HTTPException(401, "Unauthorized")
+    if not CHANNEL_ACCESS_TOKEN:
+        raise HTTPException(500, "LINE access token not configured")
+    sent = send_morning_summary(CHANNEL_ACCESS_TOKEN)
+    return {"ok": True, "sent": sent}
