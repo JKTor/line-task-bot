@@ -3,6 +3,7 @@
 Strategy: try strict pattern matching first (fast, free, predictable).
 If nothing matches and Gemini is configured, fall back to AI parsing.
 """
+import calendar
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -20,12 +21,16 @@ HELP_TEXT = (
     "• ทั้งหมด — ดูงานที่ยังไม่เสร็จ\n"
     "• เสร็จ <id> — ทำเครื่องหมายเสร็จ\n"
     "• ลบ <id> — ลบงาน\n"
+    "• ยกเลิกซ้ำ <id> — หยุดการทำซ้ำของงาน\n"
     "• ช่วยเหลือ — แสดงคำสั่งทั้งหมด\n\n"
-    "💡 พิมพ์ธรรมชาติก็ได้ เช่น 'พรุ่งนี้ลืมส่งรายงาน 6 โมงเย็น'"
+    "💡 พิมพ์ธรรมชาติก็ได้ เช่น 'พรุ่งนี้ลืมส่งรายงาน 6 โมงเย็น'\n"
+    "🔄 งานซ้ำ: 'ออกกำลังกายทุกวัน 6 โมงเช้า', 'ทุกจันทร์ประชุม 9 โมง'"
 )
 
 THAI_MONTHS = ["","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.",
                "ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]
+
+THAI_WEEKDAYS = ["จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์","อาทิตย์"]
 
 NUMBERED = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
 
@@ -34,7 +39,8 @@ NUMBERED = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣
 
 def _format_task_line(t: Task) -> str:
     mark = "✅" if t.done else "⬜"
-    return f"{mark} #{t.id} {t.title}  ⏰ {format_deadline(t.deadline)}"
+    recur = " 🔄" if t.recurring else ""
+    return f"{mark} #{t.id} {t.title}{recur}  ⏰ {format_deadline(t.deadline)}"
 
 
 def _list_message(tasks: List[Task], header: str) -> str:
@@ -65,6 +71,43 @@ def _label_for_date(target_date) -> str:
     return f"{target_date.day} {THAI_MONTHS[target_date.month]}"
 
 
+def _recurring_label(recurring: str) -> str:
+    if recurring == "daily":
+        return "🔄 ซ้ำทุกวัน"
+    if recurring.startswith("weekly:"):
+        day = THAI_WEEKDAYS[int(recurring.split(":")[1])]
+        return f"🔄 ซ้ำทุกวัน{day}"
+    if recurring.startswith("monthly:"):
+        day = recurring.split(":")[1]
+        return f"🔄 ซ้ำทุกวันที่ {day}"
+    return "🔄 ซ้ำ"
+
+
+def _next_recurring_deadline(recurring: str, from_utc: datetime) -> Optional[datetime]:
+    from_local = pytz.utc.localize(from_utc).astimezone(TZ)
+    if recurring == "daily":
+        next_local = from_local + timedelta(days=1)
+    elif recurring.startswith("weekly:"):
+        target_weekday = int(recurring.split(":")[1])
+        days_ahead = (target_weekday - from_local.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        next_local = from_local + timedelta(days=days_ahead)
+    elif recurring.startswith("monthly:"):
+        target_day = int(recurring.split(":")[1])
+        if from_local.month == 12:
+            year, month = from_local.year + 1, 1
+        else:
+            year, month = from_local.year, from_local.month + 1
+        max_day = calendar.monthrange(year, month)[1]
+        day = min(target_day, max_day)
+        next_naive = datetime(year, month, day, from_local.hour, from_local.minute)
+        next_local = TZ.localize(next_naive)
+    else:
+        return None
+    return next_local.astimezone(pytz.utc).replace(tzinfo=None)
+
+
 def _get_tasks_for_date(db: Session, user_id: str, target_date) -> List[Task]:
     start_local = TZ.localize(datetime(target_date.year, target_date.month, target_date.day))
     end_local = start_local + timedelta(days=1)
@@ -80,8 +123,9 @@ def _get_tasks_for_date(db: Session, user_id: str, target_date) -> List[Task]:
 
 
 def _format_add_beautiful(db: Session, user_id: str, new_task: Task) -> str:
+    recur_str = f"\n{_recurring_label(new_task.recurring)}" if new_task.recurring else ""
     if not new_task.deadline:
-        return f"✅ เพิ่มงานแล้ว!\n📋 #{new_task.id} {new_task.title}\n(ไม่มีกำหนดส่ง)"
+        return f"✅ เพิ่มงานแล้ว!\n📋 #{new_task.id} {new_task.title}{recur_str}\n(ไม่มีกำหนดส่ง)"
     local_dt = pytz.utc.localize(new_task.deadline).astimezone(TZ)
     target_date = local_dt.date()
     label = _label_for_date(target_date)
@@ -90,7 +134,7 @@ def _format_add_beautiful(db: Session, user_id: str, new_task: Task) -> str:
         f"〰〰〰〰〰〰〰〰〰〰\n"
         f"📌 งานที่เพิ่ม:\n"
         f"📋 {new_task.title}\n"
-        f"📅 {label} | 🕒 {time_str} น.\n"
+        f"📅 {label} | 🕒 {time_str} น.{recur_str}\n"
         f"〰〰〰〰〰〰〰〰〰〰"
     )
     same_day = _get_tasks_for_date(db, user_id, target_date)
@@ -101,15 +145,17 @@ def _format_add_beautiful(db: Session, user_id: str, new_task: Task) -> str:
         for i, t in enumerate(same_day):
             num = NUMBERED[i] if i < len(NUMBERED) else f"{i + 1}."
             t_local = pytz.utc.localize(t.deadline).astimezone(TZ)
-            lines.append(f"{num} {t.title} — {t_local.strftime('%H:%M')} น.")
+            recur_icon = " 🔄" if t.recurring else ""
+            lines.append(f"{num} {t.title}{recur_icon} — {t_local.strftime('%H:%M')} น.")
         summary = "\n".join(lines)
     return f"✅ เพิ่มงานแล้ว!\n\n{added_block}{summary}\n\n💪 สู้ๆ นะ!"
 
 
 # ===== Action handlers =====
 
-def _add_task(db: Session, user_id: str, title: str, deadline: Optional[datetime]) -> Task:
-    task = Task(user_id=user_id, title=title, deadline=deadline)
+def _add_task(db: Session, user_id: str, title: str, deadline: Optional[datetime],
+              recurring: Optional[str] = None) -> Task:
+    task = Task(user_id=user_id, title=title, deadline=deadline, recurring=recurring)
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -149,7 +195,15 @@ def _mark_done(db: Session, user_id: str, task_id: int) -> str:
         return f"ไม่เจองาน #{task_id}"
     task.done = True
     db.commit()
-    return f"🎉 ทำเครื่องหมายเสร็จแล้ว: #{task.id} {task.title}"
+    msg = f"🎉 ทำเครื่องหมายเสร็จแล้ว: #{task.id} {task.title}"
+    if task.recurring and task.deadline:
+        next_dl = _next_recurring_deadline(task.recurring, task.deadline)
+        if next_dl:
+            new_task = _add_task(db, user_id, task.title, next_dl, task.recurring)
+            local_dt = pytz.utc.localize(next_dl).astimezone(TZ)
+            label = _label_for_date(local_dt.date())
+            msg += f"\n🔄 สร้างรอบถัดไปแล้ว: {label} {local_dt.strftime('%H:%M')} น."
+    return msg
 
 
 def _delete_task(db: Session, user_id: str, task_id: int) -> str:
@@ -175,6 +229,17 @@ def _done_all(db: Session, user_id: str) -> str:
     )
     db.commit()
     return f"🎉 ปิดงานทั้งหมดแล้ว ({n} รายการ)" if n else "ไม่มีงานที่ค้างอยู่"
+
+
+def _cancel_recurring(db: Session, user_id: str, task_id: int) -> str:
+    task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
+    if not task:
+        return f"ไม่เจองาน #{task_id}"
+    if not task.recurring:
+        return f"งาน #{task_id} ไม่ได้ตั้งค่าซ้ำไว้"
+    task.recurring = None
+    db.commit()
+    return f"🔄❌ ยกเลิกการทำซ้ำแล้ว: #{task.id} {task.title}"
 
 
 # ===== Strict pattern matcher =====
@@ -221,6 +286,12 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
             return _delete_task(db, user_id, int(rest))
         return None
 
+    if text.startswith("ยกเลิกซ้ำ"):
+        rest = text[len("ยกเลิกซ้ำ"):].strip()
+        if rest.isdigit():
+            return _cancel_recurring(db, user_id, int(rest))
+        return None
+
     if text in ("ช่วยเหลือ", "help", "?"):
         return HELP_TEXT
 
@@ -243,7 +314,8 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
             if not title:
                 continue
             deadline = _ai_deadline_to_utc(t.get("deadline"))
-            saved = _add_task(db, user_id, title, deadline)
+            recurring = t.get("recurring") or None
+            saved = _add_task(db, user_id, title, deadline, recurring)
             added.append(saved)
         if not added:
             return "ไม่เจอชื่องาน ลองพิมพ์ใหม่นะครับ"
@@ -275,6 +347,12 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
 
     if action == "done_all":
         return _done_all(db, user_id)
+
+    if action == "cancel_recurring":
+        tid = intent.get("task_id")
+        if isinstance(tid, int):
+            return _cancel_recurring(db, user_id, tid)
+        return "บอก id งานที่จะยกเลิกซ้ำด้วยนะครับ เช่น 'ยกเลิกซ้ำ 3'"
 
     if action == "help":
         return HELP_TEXT
