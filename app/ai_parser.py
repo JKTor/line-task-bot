@@ -34,8 +34,8 @@ Schema:
 - ถ้าผู้ใช้พิมพ์งงๆ จับใจความไม่ได้ → intent="unknown"
 - intent="done"/"delete"/"cancel_recurring" ต้องมี task_id
 
-กฎงานซ้ำ (recurring):
-- "ทุกวัน" / "every day" / "daily" → recurring="daily"
+กฎงานซ้ำ (recurring) — สำคัญมาก อ่านให้ครบ:
+- "ทุกวัน" / "every day" / "daily" → recurring="daily" ⚠️ ต้องแปลงเวลาด้วยเสมอ
 - "ทุกจันทร์" / "every monday" → recurring="weekly:0"
 - "ทุกอังคาร" → recurring="weekly:1"
 - "ทุกพุธ" → recurring="weekly:2"
@@ -46,7 +46,8 @@ Schema:
 - "ทุกสัปดาห์" (ไม่ระบุวัน) → recurring="weekly:0" (จันทร์ default)
 - "ทุกวันที่ 15" → recurring="monthly:15"
 - "ทุกเดือน" (ไม่ระบุวันที่) → recurring="monthly:1"
-- deadline ของงานซ้ำ = ครั้งแรกที่จะเกิดขึ้น
+- deadline ของงานซ้ำ = วันพรุ่งนี้ (หรือวันถัดไปที่ตรงกับ weekday) + เวลาที่ระบุ
+- ⚠️ ห้าม deadline=null สำหรับงานซ้ำที่มีการระบุเวลา
 - "ยกเลิกซ้ำ 3" / "หยุดซ้ำงาน 3" → intent="cancel_recurring", task_id=3
 
 ⚠️ การแปลงเวลาภาษาไทย (ใช้เป๊ะตามนี้):
@@ -65,7 +66,11 @@ Schema:
 "พรุ่งนี้ส่งรายงาน 6 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<พรุ่งนี้> 18:00","recurring":null}]}
 "อ่านหนังสือ 4 ทุ่ม" → {"intent":"add","tasks":[{"title":"อ่านหนังสือ","deadline":"<วันนี้> 22:00","recurring":null}]}
 "ออกกำลังกายทุกวัน 6 โมงเช้า" → {"intent":"add","tasks":[{"title":"ออกกำลังกาย","deadline":"<พรุ่งนี้> 06:00","recurring":"daily"}]}
+"ออกกำลังกายทุกวัน 6 โมงเย็น" → {"intent":"add","tasks":[{"title":"ออกกำลังกาย","deadline":"<พรุ่งนี้> 18:00","recurring":"daily"}]}
+"วิ่งทุกวัน 7 โมงเช้า" → {"intent":"add","tasks":[{"title":"วิ่ง","deadline":"<พรุ่งนี้> 07:00","recurring":"daily"}]}
+"ทุกวันอ่านหนังสือ 3 ทุ่ม" → {"intent":"add","tasks":[{"title":"อ่านหนังสือ","deadline":"<พรุ่งนี้> 21:00","recurring":"daily"}]}
 "ทุกจันทร์ประชุมทีม 9 โมงเช้า" → {"intent":"add","tasks":[{"title":"ประชุมทีม","deadline":"<จันทร์หน้า> 09:00","recurring":"weekly:0"}]}
+"ทุกศุกร์ส่งรายงาน 5 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<ศุกร์หน้า> 17:00","recurring":"weekly:4"}]}
 "วันนี้มีอะไรบ้าง" → {"intent":"list_today"}
 "งานทั้งหมด" → {"intent":"list_all"}
 "งาน 3 เสร็จแล้ว" → {"intent":"done","task_id":3}
