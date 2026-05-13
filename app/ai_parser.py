@@ -21,18 +21,33 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยแปลงข้อ�
 
 Schema:
 {
-  "intent": "add" | "list_today" | "list_all" | "done" | "delete" | "delete_all" | "done_all" | "help" | "unknown",
-  "tasks": [{"title": "string", "deadline": "YYYY-MM-DD HH:MM" or null}],
+  "intent": "add" | "list_today" | "list_all" | "done" | "delete" | "delete_all" | "done_all" | "cancel_recurring" | "help" | "unknown",
+  "tasks": [{"title": "string", "deadline": "YYYY-MM-DD HH:MM" or null, "recurring": "daily"|"weekly:N"|"monthly:D"|null}],
   "task_id": integer or null,
   "reply": "ข้อความตอบกลับสั้นๆ เป็นมิตร (optional)"
 }
 
-กฎ:
+กฎทั่วไป:
 - ถ้าผู้ใช้สั่งเพิ่มงานหลายอย่าง ให้ list หลายตัวใน tasks
 - ถ้าไม่ระบุเวลา ให้ deadline = null
 - ถ้าระบุแค่วันไม่ระบุเวลา ใช้ 23:59
 - ถ้าผู้ใช้พิมพ์งงๆ จับใจความไม่ได้ → intent="unknown"
-- intent="done"/"delete" ต้องมี task_id
+- intent="done"/"delete"/"cancel_recurring" ต้องมี task_id
+
+กฎงานซ้ำ (recurring):
+- "ทุกวัน" / "every day" / "daily" → recurring="daily"
+- "ทุกจันทร์" / "every monday" → recurring="weekly:0"
+- "ทุกอังคาร" → recurring="weekly:1"
+- "ทุกพุธ" → recurring="weekly:2"
+- "ทุกพฤหัส" → recurring="weekly:3"
+- "ทุกศุกร์" → recurring="weekly:4"
+- "ทุกเสาร์" → recurring="weekly:5"
+- "ทุกอาทิตย์" → recurring="weekly:6"
+- "ทุกสัปดาห์" (ไม่ระบุวัน) → recurring="weekly:0" (จันทร์ default)
+- "ทุกวันที่ 15" → recurring="monthly:15"
+- "ทุกเดือน" (ไม่ระบุวันที่) → recurring="monthly:1"
+- deadline ของงานซ้ำ = ครั้งแรกที่จะเกิดขึ้น
+- "ยกเลิกซ้ำ 3" / "หยุดซ้ำงาน 3" → intent="cancel_recurring", task_id=3
 
 ⚠️ การแปลงเวลาภาษาไทย (ใช้เป๊ะตามนี้):
 - "ตี 1" = 01:00, "ตี 2" = 02:00, "ตี 3" = 03:00, "ตี 4" = 04:00, "ตี 5" = 05:00
@@ -47,10 +62,10 @@ Schema:
 - "เที่ยงคืน" = 00:00
 
 ตัวอย่าง:
-"พรุ่งนี้ส่งรายงาน 6 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<พรุ่งนี้> 18:00"}]}
-"อ่านหนังสือ 4 ทุ่ม" → {"intent":"add","tasks":[{"title":"อ่านหนังสือ","deadline":"<วันนี้> 22:00"}]}
-"ประชุม บ่าย 2" → {"intent":"add","tasks":[{"title":"ประชุม","deadline":"<วันนี้> 14:00"}]}
-"ตื่นตี 5" → {"intent":"add","tasks":[{"title":"ตื่น","deadline":"<พรุ่งนี้> 05:00"}]}
+"พรุ่งนี้ส่งรายงาน 6 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<พรุ่งนี้> 18:00","recurring":null}]}
+"อ่านหนังสือ 4 ทุ่ม" → {"intent":"add","tasks":[{"title":"อ่านหนังสือ","deadline":"<วันนี้> 22:00","recurring":null}]}
+"ออกกำลังกายทุกวัน 6 โมงเช้า" → {"intent":"add","tasks":[{"title":"ออกกำลังกาย","deadline":"<พรุ่งนี้> 06:00","recurring":"daily"}]}
+"ทุกจันทร์ประชุมทีม 9 โมงเช้า" → {"intent":"add","tasks":[{"title":"ประชุมทีม","deadline":"<จันทร์หน้า> 09:00","recurring":"weekly:0"}]}
 "วันนี้มีอะไรบ้าง" → {"intent":"list_today"}
 "งานทั้งหมด" → {"intent":"list_all"}
 "งาน 3 เสร็จแล้ว" → {"intent":"done","task_id":3}
@@ -58,6 +73,7 @@ Schema:
 "ลบทั้งหมด" / "ลบงานทั้งหมด" → {"intent":"delete_all"}
 "เคลียร์งานหมดเลย" → {"intent":"delete_all"}
 "ปิดงานทั้งหมด" / "เสร็จหมดแล้ว" → {"intent":"done_all"}
+"ยกเลิกซ้ำงาน 3" → {"intent":"cancel_recurring","task_id":3}
 "ช่วยอะไรได้บ้าง" → {"intent":"help"}
 """
 
