@@ -15,3 +15,4 @@ class Task(Base):
     done = Column(Boolean, default=False, nullable=False)
     notified = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    recurring = Column(String(30), nullable=True)
