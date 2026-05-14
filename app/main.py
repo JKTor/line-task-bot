@@ -55,19 +55,12 @@ def health():
 
 @app.get("/debug/ai")
 def debug_ai():
-    from app.database import DATABASE_URL, _is_pg
-    from urllib.parse import urlparse
-    p = urlparse(DATABASE_URL)
     return {
         "groq_set": bool(os.getenv("GROQ_API_KEY")),
         "gemini_set": bool(os.getenv("GEMINI_API_KEY")),
         "line_secret_set": bool(os.getenv("LINE_CHANNEL_SECRET")),
         "line_token_set": bool(os.getenv("LINE_CHANNEL_ACCESS_TOKEN")),
         "line_user_id_set": bool(os.getenv("LINE_USER_ID")),
-        "db_scheme": p.scheme,
-        "db_host": p.hostname,
-        "db_query_params": p.query,
-        "db_is_pg": _is_pg,
     }
 
 
@@ -106,36 +99,6 @@ async def webhook(request: Request, x_line_signature: str = Header(None), db: Se
             )
     return {"ok": True}
 
-
-@app.get("/test/db")
-def test_db(db: Session = Depends(get_db)):
-    """Temporary test endpoint — verifies DB tables and columns exist."""
-    from sqlalchemy import text
-    from app.models import Routine
-    results = {}
-
-    try:
-        r = Routine(user_id="__test__", title="test", time_hour=8, time_minute=0)
-        db.add(r)
-        db.commit()
-        rid = r.id
-        db.query(Routine).filter_by(id=rid).delete()
-        db.commit()
-        results["routines_table"] = "ok"
-    except Exception as e:
-        results["routines_table"] = str(e)
-
-    try:
-        rows = db.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name='tasks' AND column_name='completed_at'"
-        )).fetchall()
-        results["completed_at_col"] = "ok" if rows else "missing"
-    except Exception as e:
-        results["completed_at_col"] = str(e)
-
-    results["overall"] = "pass" if all(v == "ok" for v in results.values()) else "fail"
-    return results
 
 
 @app.get("/cron/check")
