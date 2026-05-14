@@ -55,12 +55,19 @@ def health():
 
 @app.get("/debug/ai")
 def debug_ai():
+    from urllib.parse import urlparse, parse_qs
+    raw = os.getenv("DATABASE_URL", "sqlite:///./tasks.db")
+    p = urlparse(raw)
+    q = parse_qs(p.query, keep_blank_values=True)
     return {
         "groq_set": bool(os.getenv("GROQ_API_KEY")),
         "gemini_set": bool(os.getenv("GEMINI_API_KEY")),
         "line_secret_set": bool(os.getenv("LINE_CHANNEL_SECRET")),
         "line_token_set": bool(os.getenv("LINE_CHANNEL_ACCESS_TOKEN")),
         "line_user_id_set": bool(os.getenv("LINE_USER_ID")),
+        "db_scheme": p.scheme,
+        "db_sslmode": q.get("sslmode", ["not_set"])[0],
+        "db_query_raw": p.query,
     }
 
 
