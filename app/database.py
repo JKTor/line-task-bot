@@ -10,8 +10,19 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./tasks.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
+_is_pg = DATABASE_URL.startswith("postgresql")
+
+if _is_pg:
+    # Neon serverless drops idle connections; NullPool creates a fresh connection
+    # per request to avoid stale-connection SSL errors (recommended by Neon docs).
+    from sqlalchemy.pool import NullPool
+    engine = create_engine(DATABASE_URL, poolclass=NullPool)
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        pool_pre_ping=True,
+    )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
@@ -27,8 +38,7 @@ def get_db():
 
 def migrate_db() -> None:
     """Add new columns to existing tables without Alembic."""
-    is_pg = DATABASE_URL.startswith("postgresql")
-    ts_type = "TIMESTAMP" if is_pg else "DATETIME"
+    ts_type = "TIMESTAMP" if _is_pg else "DATETIME"
     migrations = [
         "ALTER TABLE tasks ADD COLUMN recurring VARCHAR(30)",
         f"ALTER TABLE tasks ADD COLUMN completed_at {ts_type}",
@@ -39,10 +49,10 @@ def migrate_db() -> None:
                 conn.execute(text(stmt))
                 conn.commit()
             except Exception:
-                pass  # column already exists
+                conn.rollback()  # clear aborted transaction before next statement
 
 
-def init_db(retries: int = 5, delay: float = 2.0) -> None:
+def init_db(retries: int = 10, delay: float = 3.0) -> None:
     from app import models  # noqa: F401
     for attempt in range(1, retries + 1):
         try:
