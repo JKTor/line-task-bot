@@ -27,9 +27,11 @@ def get_db():
 
 def migrate_db() -> None:
     """Add new columns to existing tables without Alembic."""
+    is_pg = DATABASE_URL.startswith("postgresql")
+    ts_type = "TIMESTAMP" if is_pg else "DATETIME"
     migrations = [
         "ALTER TABLE tasks ADD COLUMN recurring VARCHAR(30)",
-        "ALTER TABLE tasks ADD COLUMN completed_at DATETIME",
+        f"ALTER TABLE tasks ADD COLUMN completed_at {ts_type}",
     ]
     with engine.connect() as conn:
         for stmt in migrations:
