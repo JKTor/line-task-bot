@@ -384,7 +384,8 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
     extra = intent.get("reply", "")
 
     if action == "add":
-        tasks_in = intent.get("tasks") or []
+        tasks_raw = intent.get("tasks")
+        tasks_in = tasks_raw if isinstance(tasks_raw, list) else []
         if not tasks_in:
             return "ไม่เจอชื่องาน ลองพิมพ์ใหม่นะครับ"
         added = []
@@ -434,7 +435,8 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
         return "บอก id งานที่จะยกเลิกซ้ำด้วยนะครับ เช่น 'ยกเลิกซ้ำ 3'"
 
     if action == "add_routine":
-        r = intent.get("routine") or {}
+        r_raw = intent.get("routine")
+        r = r_raw if isinstance(r_raw, dict) else {}
         title = (r.get("title") or "").strip()
         if not title:
             return "ไม่เจอชื่อกิจวัตร ลองพิมพ์ใหม่นะครับ\nเช่น 'ออกกำลังกายทุกวัน 18.00'"
@@ -444,7 +446,10 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
         except Exception:
             h, m = 8, 0
         days = (r.get("days") or "daily").strip()
-        advance = int(r.get("advance_minutes") or 30)
+        try:
+            advance = int(r.get("advance_minutes") or 30)
+        except (TypeError, ValueError):
+            advance = 30
         saved = _add_routine(db, user_id, title, h, m, days, advance)
         notify_str = _routine_notify_str(saved.time_hour, saved.time_minute, saved.advance_minutes)
         return (
