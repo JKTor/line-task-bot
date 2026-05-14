@@ -14,7 +14,7 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from sqlalchemy.orm import Session
 
-from app.database import get_db, init_db
+from app.database import SessionLocal, get_db, init_db
 from app.line_handler import handle_command
 from app.scheduler import (
     check_and_send_reminders,
@@ -98,6 +98,41 @@ async def webhook(request: Request, x_line_signature: str = Header(None), db: Se
                 )
             )
     return {"ok": True}
+
+
+@app.get("/test/db")
+def test_db():
+    """Temporary test endpoint — verifies DB tables and columns exist."""
+    results = {}
+    db = SessionLocal()
+    try:
+        from app.models import Routine
+        r = Routine(user_id="__test__", title="test", time_hour=8, time_minute=0)
+        db.add(r)
+        db.commit()
+        rid = r.id
+        db.query(Routine).filter_by(id=rid).delete()
+        db.commit()
+        results["routines_table"] = "ok"
+    except Exception as e:
+        results["routines_table"] = str(e)
+    finally:
+        db.close()
+
+    try:
+        from sqlalchemy import text
+        from app.database import engine
+        with engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='tasks' AND column_name='completed_at'"
+            )).fetchall()
+        results["completed_at_col"] = "ok" if rows else "missing"
+    except Exception as e:
+        results["completed_at_col"] = str(e)
+
+    results["overall"] = "pass" if all(v == "ok" for v in results.values()) else "fail"
+    return results
 
 
 @app.get("/cron/check")
