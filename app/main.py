@@ -89,8 +89,9 @@ async def webhook(request: Request, x_line_signature: str = Header(None), db: Se
             try:
                 reply = handle_command(db, user_id, text)
             except Exception as e:
-                print(f"[webhook] handler error: {e}")
-                reply = "เกิดข้อผิดพลาด ลองใหม่อีกครั้งนะครับ"
+                import traceback
+                print(f"[webhook] handler error: {e}\n{traceback.format_exc()}")
+                reply = f"[DEBUG] {type(e).__name__}: {str(e)[:200]}"
             api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
