@@ -1,5 +1,6 @@
 import os
 import time
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -13,10 +14,19 @@ if DATABASE_URL.startswith("postgres://"):
 _is_pg = DATABASE_URL.startswith("postgresql")
 
 if _is_pg:
-    # Neon serverless drops idle connections; NullPool creates a fresh connection
-    # per request to avoid stale-connection SSL errors (recommended by Neon docs).
+    # Neon: strip sslmode from URL and pass it via connect_args instead.
+    # psycopg2 can misparse sslmode from URL query strings (sees "requ" instead
+    # of "require"); connect_args bypasses this.
     from sqlalchemy.pool import NullPool
-    engine = create_engine(DATABASE_URL, poolclass=NullPool)
+    _parsed = urlparse(DATABASE_URL)
+    _params = {k: v for k, v in parse_qs(_parsed.query, keep_blank_values=True).items()
+               if k != "sslmode"}
+    _clean_url = urlunparse(_parsed._replace(query=urlencode(_params, doseq=True)))
+    engine = create_engine(
+        _clean_url,
+        poolclass=NullPool,
+        connect_args={"sslmode": "require"},
+    )
 else:
     engine = create_engine(
         DATABASE_URL,
@@ -49,7 +59,7 @@ def migrate_db() -> None:
                 conn.execute(text(stmt))
                 conn.commit()
             except Exception:
-                conn.rollback()  # clear aborted transaction before next statement
+                conn.rollback()
 
 
 def init_db(retries: int = 10, delay: float = 3.0) -> None:
