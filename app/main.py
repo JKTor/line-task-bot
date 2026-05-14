@@ -101,6 +101,38 @@ async def webhook(request: Request, x_line_signature: str = Header(None), db: Se
 
 
 
+@app.get("/test/db")
+def test_db(db: Session = Depends(get_db)):
+    from sqlalchemy import text
+    from app.models import Routine
+    results = {}
+    try:
+        r = Routine(user_id="__test__", title="test", time_hour=8, time_minute=0)
+        db.add(r)
+        db.commit()
+        db.query(Routine).filter_by(id=r.id).delete()
+        db.commit()
+        results["routines_table"] = "ok"
+    except Exception as e:
+        results["routines_table"] = str(e)[:200]
+    try:
+        rows = db.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='tasks' AND column_name='completed_at'"
+        )).fetchall()
+        results["completed_at_col"] = "ok" if rows else "missing"
+    except Exception as e:
+        results["completed_at_col"] = str(e)[:200]
+    try:
+        from app.models import Task
+        db.query(Task).filter(Task.done == False).limit(1).all()  # noqa: E712
+        results["task_query"] = "ok"
+    except Exception as e:
+        results["task_query"] = str(e)[:200]
+    results["overall"] = "pass" if all(v == "ok" for v in results.values()) else "fail"
+    return results
+
+
 @app.get("/cron/check")
 def cron_check(secret: str = ""):
     """External cron endpoint. Call every 1-5 minutes from cron-job.org.
