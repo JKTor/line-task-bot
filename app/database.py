@@ -1,5 +1,6 @@
 import os
 import time
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -12,9 +13,28 @@ if DATABASE_URL.startswith("postgres://"):
 
 _is_pg = DATABASE_URL.startswith("postgresql")
 
-# Use same engine setup as the working original code — do not manipulate the URL
-connect_args = {"check_same_thread": False} if not _is_pg else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
+if _is_pg:
+    # Fix potential truncated sslmode (e.g. "requ" instead of "require")
+    # then pass it explicitly via connect_args to avoid psycopg2 URL parsing bugs.
+    _VALID_SSL = {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
+    _p = urlparse(DATABASE_URL)
+    _q = {k: v for k, v in parse_qs(_p.query, keep_blank_values=True).items()
+          if k != "sslmode"}
+    _ssl_raw = parse_qs(_p.query, keep_blank_values=True).get("sslmode", ["require"])[0]
+    _ssl = _ssl_raw if _ssl_raw in _VALID_SSL else "require"
+    _clean_url = urlunparse(_p._replace(query=urlencode(_q, doseq=True)))
+    engine = create_engine(
+        _clean_url,
+        connect_args={"sslmode": _ssl},
+        pool_pre_ping=True,
+    )
+    print(f"[db] using sslmode={_ssl} (raw was: {_ssl_raw!r})")
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        pool_pre_ping=True,
+    )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
