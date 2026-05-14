@@ -55,19 +55,12 @@ def health():
 
 @app.get("/debug/ai")
 def debug_ai():
-    from urllib.parse import urlparse, parse_qs
-    raw = os.getenv("DATABASE_URL", "sqlite:///./tasks.db")
-    p = urlparse(raw)
-    q = parse_qs(p.query, keep_blank_values=True)
     return {
         "groq_set": bool(os.getenv("GROQ_API_KEY")),
         "gemini_set": bool(os.getenv("GEMINI_API_KEY")),
         "line_secret_set": bool(os.getenv("LINE_CHANNEL_SECRET")),
         "line_token_set": bool(os.getenv("LINE_CHANNEL_ACCESS_TOKEN")),
         "line_user_id_set": bool(os.getenv("LINE_USER_ID")),
-        "db_scheme": p.scheme,
-        "db_sslmode": q.get("sslmode", ["not_set"])[0],
-        "db_query_raw": p.query,
     }
 
 
@@ -96,9 +89,8 @@ async def webhook(request: Request, x_line_signature: str = Header(None), db: Se
             try:
                 reply = handle_command(db, user_id, text)
             except Exception as e:
-                import traceback
-                print(f"[webhook] handler error: {e}\n{traceback.format_exc()}")
-                reply = f"[DEBUG] {type(e).__name__}: {str(e)[:200]}"
+                print(f"[webhook] handler error: {e}")
+                reply = "เกิดข้อผิดพลาด ลองใหม่อีกครั้งนะครับ"
             api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
@@ -107,38 +99,6 @@ async def webhook(request: Request, x_line_signature: str = Header(None), db: Se
             )
     return {"ok": True}
 
-
-
-@app.get("/test/db")
-def test_db(db: Session = Depends(get_db)):
-    from sqlalchemy import text
-    from app.models import Routine
-    results = {}
-    try:
-        r = Routine(user_id="__test__", title="test", time_hour=8, time_minute=0)
-        db.add(r)
-        db.commit()
-        db.query(Routine).filter_by(id=r.id).delete()
-        db.commit()
-        results["routines_table"] = "ok"
-    except Exception as e:
-        results["routines_table"] = str(e)[:200]
-    try:
-        rows = db.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name='tasks' AND column_name='completed_at'"
-        )).fetchall()
-        results["completed_at_col"] = "ok" if rows else "missing"
-    except Exception as e:
-        results["completed_at_col"] = str(e)[:200]
-    try:
-        from app.models import Task
-        db.query(Task).filter(Task.done == False).limit(1).all()  # noqa: E712
-        results["task_query"] = "ok"
-    except Exception as e:
-        results["task_query"] = str(e)[:200]
-    results["overall"] = "pass" if all(v == "ok" for v in results.values()) else "fail"
-    return results
 
 
 @app.get("/cron/check")

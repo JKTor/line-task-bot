@@ -4,6 +4,18 @@
 
 ---
 
+## [2026-05-15] — Session 2: แก้ SSL bug + Routine ใช้งานได้
+
+### แก้ Bug
+- **SSL error `invalid sslmode value: "requ"`**: ค่า `sslmode` ใน `DATABASE_URL` ถูกตัดให้สั้น psycopg2 อ่านไม่ได้ แก้โดยดึง `sslmode` ออกจาก URL แล้วส่งผ่าน `connect_args` แทน (normalize ค่าผิดเป็น `require` อัตโนมัติ)
+- **AI ส่ง routine เป็น non-dict**: เพิ่ม `isinstance()` check ป้องกัน crash ถ้า AI ส่ง `"routine"` เป็น string แทน dict
+
+### ไฟล์ที่แก้ไข
+- `app/database.py` — strip sslmode จาก URL + normalize + pass via connect_args
+- `app/line_handler.py` — isinstance guard สำหรับ routine/tasks จาก AI
+
+---
+
 ## [2026-05-15] — Session: เพิ่มฟีเจอร์แจ้งเตือนและกิจวัตร
 
 ### เพิ่มใหม่
