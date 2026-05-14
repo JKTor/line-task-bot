@@ -55,12 +55,19 @@ def health():
 
 @app.get("/debug/ai")
 def debug_ai():
+    from app.database import DATABASE_URL, _is_pg
+    from urllib.parse import urlparse
+    p = urlparse(DATABASE_URL)
     return {
         "groq_set": bool(os.getenv("GROQ_API_KEY")),
         "gemini_set": bool(os.getenv("GEMINI_API_KEY")),
         "line_secret_set": bool(os.getenv("LINE_CHANNEL_SECRET")),
         "line_token_set": bool(os.getenv("LINE_CHANNEL_ACCESS_TOKEN")),
         "line_user_id_set": bool(os.getenv("LINE_USER_ID")),
+        "db_scheme": p.scheme,
+        "db_host": p.hostname,
+        "db_query_params": p.query,
+        "db_is_pg": _is_pg,
     }
 
 
