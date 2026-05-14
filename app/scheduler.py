@@ -12,7 +12,7 @@ from linebot.v3.messaging import (
 )
 
 from app.database import SessionLocal
-from app.models import Task
+from app.models import Routine, Task
 from app.parser import format_deadline, now_local
 
 THAI_DAYS = ["จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์","อาทิตย์"]
@@ -67,58 +67,186 @@ def check_and_send_reminders(access_token: str) -> int:
         db.close()
 
 
-def send_morning_summary(access_token: str) -> bool:
-    """Push today's task summary. Returns True if message was sent."""
-    user_id = os.getenv("LINE_USER_ID", "")
-    if not user_id:
-        print("[morning] LINE_USER_ID not set, skipping")
-        return False
-
+def check_routine_reminders(access_token: str) -> int:
+    """Send routine reminders when it's within the advance window. Returns count sent."""
     db = SessionLocal()
+    sent = 0
     try:
-        today_local = now_local()
-        today_date = today_local.date()
-        start_local = today_local.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_local = start_local + timedelta(days=1)
-        start_utc = start_local.astimezone(pytz.utc).replace(tzinfo=None)
-        end_utc = end_local.astimezone(pytz.utc).replace(tzinfo=None)
+        now = now_local()
+        today_str = now.date().isoformat()
+        today_weekday = str(now.weekday())  # 0=Mon … 6=Sun
 
-        tasks = (
-            db.query(Task)
-            .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
-            .filter(Task.deadline >= start_utc, Task.deadline < end_utc)
-            .order_by(Task.deadline.asc())
-            .all()
-        )
+        routines = db.query(Routine).all()
+        for routine in routines:
+            if routine.days != "daily":
+                allowed = [d.strip() for d in routine.days.split(",")]
+                if today_weekday not in allowed:
+                    continue
 
-        day_name = THAI_DAYS[today_date.weekday()]
-        date_str = f"วัน{day_name}ที่ {today_date.day} {THAI_MONTHS[today_date.month]} {today_date.year + 543}"
+            if routine.last_notified_date == today_str:
+                continue
 
-        if not tasks:
-            text = (
-                f"🌅 กุดมอร์นิ่ง! {date_str}\n\n"
-                f"วันนี้ไม่มีงานค้างอยู่ 🎉\n"
-                f"สนุกกับวันว่างได้เลยนะ!"
+            routine_dt = now.replace(
+                hour=routine.time_hour, minute=routine.time_minute, second=0, microsecond=0
             )
-        else:
-            tz = today_local.tzinfo
-            lines = [
-                f"🌅 กุดมอร์นิ่ง! {date_str}\n",
-                "〰〰〰〰〰〰〰〰〰〰",
-                "📋 งานวันนี้ที่ต้องทำ",
-                "〰〰〰〰〰〰〰〰〰〰",
-            ]
-            for i, t in enumerate(tasks):
-                num = NUMBERED[i] if i < len(NUMBERED) else f"{i + 1}."
-                t_local = pytz.utc.localize(t.deadline).astimezone(tz)
-                lines.append(f"{num} {t.title} — {t_local.strftime('%H:%M')} น.")
-            lines.append(f"\nมีงาน {len(tasks)} อย่างวันนี้ 🎯 สู้ๆ!")
-            text = "\n".join(lines)
+            notify_dt = routine_dt - timedelta(minutes=routine.advance_minutes)
+            delta = (now - notify_dt).total_seconds()
 
-        _push(access_token, user_id, text)
-        return True
-    except Exception as e:
-        print(f"[morning] failed: {e}")
-        return False
+            if 0 <= delta < 300:  # within 5-minute cron window
+                text = (
+                    f"⏰ อย่าลืม{routine.title}นะ!\n"
+                    f"อีก {routine.advance_minutes} นาที "
+                    f"({routine.time_hour:02d}:{routine.time_minute:02d})"
+                )
+                try:
+                    _push(access_token, routine.user_id, text)
+                    routine.last_notified_date = today_str
+                    sent += 1
+                except Exception as e:
+                    print(f"[routine_reminder] failed for routine {routine.id}: {e}")
+
+        db.commit()
+        return sent
+    finally:
+        db.close()
+
+
+def morning_digest(access_token: str) -> int:
+    """Send 8 AM morning summary to all users with pending tasks. Returns users notified."""
+    db = SessionLocal()
+    sent = 0
+    try:
+        now = now_local()
+        today_date = now.date()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = today_start + timedelta(days=1)
+        start_utc = today_start.astimezone(pytz.utc).replace(tzinfo=None)
+        end_utc = today_end.astimezone(pytz.utc).replace(tzinfo=None)
+
+        user_ids = {
+            uid for (uid,) in
+            db.query(Task.user_id).filter(Task.done == False).distinct().all()  # noqa: E712
+        }
+
+        for user_id in user_ids:
+            today_tasks = (
+                db.query(Task)
+                .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+                .filter(Task.deadline.isnot(None))
+                .filter(Task.deadline >= start_utc, Task.deadline < end_utc)
+                .order_by(Task.deadline.asc())
+                .all()
+            )
+            overdue_tasks = (
+                db.query(Task)
+                .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+                .filter(Task.deadline.isnot(None))
+                .filter(Task.deadline < start_utc)
+                .order_by(Task.deadline.asc())
+                .all()
+            )
+
+            if not today_tasks and not overdue_tasks:
+                continue
+
+            day_name = THAI_DAYS[today_date.weekday()]
+            date_str = (
+                f"วัน{day_name}ที่ {today_date.day} "
+                f"{THAI_MONTHS[today_date.month]} {today_date.year + 543}"
+            )
+            tz = now.tzinfo
+            lines = [f"🌅 กุดมอร์นิ่ง! {date_str}\n"]
+
+            if today_tasks:
+                lines.append("〰〰〰〰〰〰〰〰〰〰")
+                lines.append(f"📋 งานวันนี้ที่ต้องทำ ({len(today_tasks)} งาน)")
+                lines.append("〰〰〰〰〰〰〰〰〰〰")
+                for i, t in enumerate(today_tasks):
+                    num = NUMBERED[i] if i < len(NUMBERED) else f"{i + 1}."
+                    t_local = pytz.utc.localize(t.deadline).astimezone(tz)
+                    recur_icon = " 🔄" if t.recurring else ""
+                    lines.append(f"{num} {t.title}{recur_icon} — {t_local.strftime('%H:%M')} น.")
+
+            if overdue_tasks:
+                lines.append("\n⚠️ งานที่เลยกำหนดแล้ว:")
+                for t in overdue_tasks:
+                    lines.append(f"  • #{t.id} {t.title}  ⏰ {format_deadline(t.deadline)}")
+
+            lines.append("\n💪 สู้ๆ นะ!")
+            try:
+                _push(access_token, user_id, "\n".join(lines))
+                sent += 1
+            except Exception as e:
+                print(f"[morning_digest] failed for {user_id}: {e}")
+
+        return sent
+    finally:
+        db.close()
+
+
+def weekly_summary(access_token: str) -> int:
+    """Send weekly summary on Sundays. Returns number of users notified."""
+    db = SessionLocal()
+    sent = 0
+    try:
+        now = now_local()
+        now_utc = now.astimezone(pytz.utc).replace(tzinfo=None)
+        week_ago_utc = (now - timedelta(days=7)).astimezone(pytz.utc).replace(tzinfo=None)
+        next_week_utc = (now + timedelta(days=7)).astimezone(pytz.utc).replace(tzinfo=None)
+
+        user_ids = {uid for (uid,) in db.query(Task.user_id).distinct().all()} | {
+            uid for (uid,) in db.query(Routine.user_id).distinct().all()
+        }
+
+        for user_id in user_ids:
+            completed = (
+                db.query(Task)
+                .filter(Task.user_id == user_id, Task.done == True)  # noqa: E712
+                .filter(Task.completed_at.isnot(None))
+                .filter(Task.completed_at >= week_ago_utc, Task.completed_at <= now_utc)
+                .all()
+            )
+            overdue = (
+                db.query(Task)
+                .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+                .filter(Task.deadline.isnot(None), Task.deadline < now_utc)
+                .order_by(Task.deadline.asc())
+                .all()
+            )
+            next_week = (
+                db.query(Task)
+                .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+                .filter(Task.deadline.isnot(None))
+                .filter(Task.deadline >= now_utc, Task.deadline <= next_week_utc)
+                .order_by(Task.deadline.asc())
+                .all()
+            )
+
+            lines = [
+                "📊 สรุปสัปดาห์นี้",
+                "〰〰〰〰〰〰〰〰〰〰",
+                f"✅ เสร็จแล้ว: {len(completed)} งาน",
+                f"⚠️ เลยกำหนด: {len(overdue)} งาน",
+                f"📅 สัปดาห์หน้า: {len(next_week)} งาน",
+            ]
+            if next_week:
+                lines.append("\n📅 งานสัปดาห์หน้า:")
+                tz = now.tzinfo
+                for i, t in enumerate(next_week):
+                    num = NUMBERED[i] if i < len(NUMBERED) else f"{i + 1}."
+                    t_local = pytz.utc.localize(t.deadline).astimezone(tz)
+                    lines.append(f"{num} {t.title} — {t_local.strftime('%d/%m %H:%M')} น.")
+            if overdue:
+                lines.append("\n⚠️ งานที่ค้างอยู่:")
+                for t in overdue:
+                    lines.append(f"  • #{t.id} {t.title}  ⏰ {format_deadline(t.deadline)}")
+
+            try:
+                _push(access_token, user_id, "\n".join(lines))
+                sent += 1
+            except Exception as e:
+                print(f"[weekly_summary] failed for {user_id}: {e}")
+
+        return sent
     finally:
         db.close()

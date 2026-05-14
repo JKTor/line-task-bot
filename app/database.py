@@ -25,6 +25,21 @@ def get_db():
         db.close()
 
 
+def migrate_db() -> None:
+    """Add new columns to existing tables without Alembic."""
+    migrations = [
+        "ALTER TABLE tasks ADD COLUMN recurring VARCHAR(30)",
+        "ALTER TABLE tasks ADD COLUMN completed_at DATETIME",
+    ]
+    with engine.connect() as conn:
+        for stmt in migrations:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass  # column already exists
+
+
 def init_db(retries: int = 5, delay: float = 2.0) -> None:
     from app import models  # noqa: F401
     for attempt in range(1, retries + 1):
@@ -32,6 +47,7 @@ def init_db(retries: int = 5, delay: float = 2.0) -> None:
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
             Base.metadata.create_all(bind=engine)
+            migrate_db()
             print(f"[init_db] connected on attempt {attempt}")
             return
         except Exception as e:

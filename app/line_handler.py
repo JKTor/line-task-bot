@@ -1,7 +1,7 @@
 """Handle text commands from LINE users.
 
 Strategy: try strict pattern matching first (fast, free, predictable).
-If nothing matches and Gemini is configured, fall back to AI parsing.
+If nothing matches and AI is configured, fall back to AI parsing.
 """
 import calendar
 from datetime import datetime, timedelta
@@ -11,7 +11,7 @@ import pytz
 from sqlalchemy.orm import Session
 
 from app import ai_parser
-from app.models import Task
+from app.models import Routine, Task
 from app.parser import TZ, format_deadline, now_local, parse_task
 
 HELP_TEXT = (
@@ -22,9 +22,12 @@ HELP_TEXT = (
     "• เสร็จ <id> — ทำเครื่องหมายเสร็จ\n"
     "• ลบ <id> — ลบงาน\n"
     "• ยกเลิกซ้ำ <id> — หยุดการทำซ้ำของงาน\n"
+    "• กิจวัตร — ดูกิจวัตรประจำวัน\n"
+    "• ลบกิจวัตร <id> — ลบกิจวัตร\n"
     "• ช่วยเหลือ — แสดงคำสั่งทั้งหมด\n\n"
     "💡 พิมพ์ธรรมชาติก็ได้ เช่น 'พรุ่งนี้ลืมส่งรายงาน 6 โมงเย็น'\n"
-    "🔄 งานซ้ำ: 'ออกกำลังกายทุกวัน 6 โมงเช้า', 'ทุกจันทร์ประชุม 9 โมง'"
+    "🔄 งานซ้ำ: 'ออกกำลังกายทุกวัน 6 โมงเช้า', 'ทุกจันทร์ประชุม 9 โมง'\n"
+    "🔔 กิจวัตร: 'ออกกำลังกายทุกวัน 18.00'"
 )
 
 THAI_MONTHS = ["","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.",
@@ -33,6 +36,11 @@ THAI_MONTHS = ["","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","
 THAI_WEEKDAYS = ["จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์","อาทิตย์"]
 
 NUMBERED = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+
+_ROUTINE_DAY_NAMES = {
+    "0": "จันทร์", "1": "อังคาร", "2": "พุธ",
+    "3": "พฤหัส", "4": "ศุกร์", "5": "เสาร์", "6": "อาทิตย์",
+}
 
 
 # ===== Helpers =====
@@ -151,7 +159,20 @@ def _format_add_beautiful(db: Session, user_id: str, new_task: Task) -> str:
     return f"✅ เพิ่มงานแล้ว!\n\n{added_block}{summary}\n\n💪 สู้ๆ นะ!"
 
 
-# ===== Action handlers =====
+def _format_routine_days(days: str) -> str:
+    if days == "daily":
+        return "ทุกวัน"
+    parts = [_ROUTINE_DAY_NAMES.get(d.strip(), d) for d in days.split(",")]
+    return "วัน" + "/".join(parts)
+
+
+def _routine_notify_str(time_hour: int, time_minute: int, advance_minutes: int) -> str:
+    dummy = datetime(2000, 1, 1, time_hour, time_minute)
+    notify = dummy - timedelta(minutes=advance_minutes)
+    return f"{notify.hour:02d}:{notify.minute:02d}"
+
+
+# ===== Task handlers =====
 
 def _add_task(db: Session, user_id: str, title: str, deadline: Optional[datetime],
               recurring: Optional[str] = None) -> Task:
@@ -194,6 +215,7 @@ def _mark_done(db: Session, user_id: str, task_id: int) -> str:
     if not task:
         return f"ไม่เจองาน #{task_id}"
     task.done = True
+    task.completed_at = datetime.utcnow()
     db.commit()
     msg = f"🎉 ทำเครื่องหมายเสร็จแล้ว: #{task.id} {task.title}"
     if task.recurring and task.deadline:
@@ -225,7 +247,7 @@ def _done_all(db: Session, user_id: str) -> str:
     n = (
         db.query(Task)
         .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
-        .update({Task.done: True})
+        .update({Task.done: True, Task.completed_at: datetime.utcnow()})
     )
     db.commit()
     return f"🎉 ปิดงานทั้งหมดแล้ว ({n} รายการ)" if n else "ไม่มีงานที่ค้างอยู่"
@@ -240,6 +262,54 @@ def _cancel_recurring(db: Session, user_id: str, task_id: int) -> str:
     task.recurring = None
     db.commit()
     return f"🔄❌ ยกเลิกการทำซ้ำแล้ว: #{task.id} {task.title}"
+
+
+# ===== Routine handlers =====
+
+def _add_routine(
+    db: Session, user_id: str, title: str,
+    time_hour: int, time_minute: int,
+    days: str = "daily", advance_minutes: int = 30,
+) -> Routine:
+    routine = Routine(
+        user_id=user_id, title=title,
+        time_hour=time_hour, time_minute=time_minute,
+        days=days, advance_minutes=advance_minutes,
+    )
+    db.add(routine)
+    db.commit()
+    db.refresh(routine)
+    return routine
+
+
+def _list_routines(db: Session, user_id: str) -> str:
+    routines = (
+        db.query(Routine)
+        .filter_by(user_id=user_id)
+        .order_by(Routine.time_hour, Routine.time_minute)
+        .all()
+    )
+    if not routines:
+        return "ยังไม่มีกิจวัตร\n💡 เพิ่มได้เลย เช่น 'ออกกำลังกายทุกวัน 18.00'"
+    lines = ["🔄 กิจวัตรประจำวัน:"]
+    for r in routines:
+        notify_str = _routine_notify_str(r.time_hour, r.time_minute, r.advance_minutes)
+        lines.append(
+            f"#{r.id} {r.title} — {r.time_hour:02d}:{r.time_minute:02d} "
+            f"{_format_routine_days(r.days)}\n"
+            f"   ⏰ แจ้งเตือนก่อน {r.advance_minutes} นาที ({notify_str})"
+        )
+    return "\n".join(lines)
+
+
+def _delete_routine(db: Session, user_id: str, routine_id: int) -> str:
+    routine = db.query(Routine).filter_by(id=routine_id, user_id=user_id).first()
+    if not routine:
+        return f"ไม่เจอกิจวัตร #{routine_id}"
+    title = routine.title
+    db.delete(routine)
+    db.commit()
+    return f"🗑️ ลบกิจวัตรแล้ว: #{routine_id} {title}"
 
 
 # ===== Strict pattern matcher =====
@@ -274,6 +344,15 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
         if rest.isdigit():
             return _mark_done(db, user_id, int(rest))
         return None
+
+    if text.startswith("ลบกิจวัตร"):
+        rest = text[len("ลบกิจวัตร"):].strip()
+        if rest.isdigit():
+            return _delete_routine(db, user_id, int(rest))
+        return None
+
+    if text in ("กิจวัตร", "กิจวัตรของฉัน", "routine", "routines"):
+        return _list_routines(db, user_id)
 
     if text.startswith("ลบ") or lower.startswith("del ") or lower.startswith("delete "):
         if text.startswith("ลบ"):
@@ -353,6 +432,36 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
         if isinstance(tid, int):
             return _cancel_recurring(db, user_id, tid)
         return "บอก id งานที่จะยกเลิกซ้ำด้วยนะครับ เช่น 'ยกเลิกซ้ำ 3'"
+
+    if action == "add_routine":
+        r = intent.get("routine") or {}
+        title = (r.get("title") or "").strip()
+        if not title:
+            return "ไม่เจอชื่อกิจวัตร ลองพิมพ์ใหม่นะครับ\nเช่น 'ออกกำลังกายทุกวัน 18.00'"
+        time_str = (r.get("time") or "08:00").strip()
+        try:
+            h, m = [int(x) for x in time_str.split(":")]
+        except Exception:
+            h, m = 8, 0
+        days = (r.get("days") or "daily").strip()
+        advance = int(r.get("advance_minutes") or 30)
+        saved = _add_routine(db, user_id, title, h, m, days, advance)
+        notify_str = _routine_notify_str(saved.time_hour, saved.time_minute, saved.advance_minutes)
+        return (
+            f"✅ เพิ่มกิจวัตรแล้ว!\n"
+            f"🔔 #{saved.id} {saved.title} — {saved.time_hour:02d}:{saved.time_minute:02d} "
+            f"{_format_routine_days(saved.days)}\n"
+            f"⏰ จะแจ้งเตือนก่อน {saved.advance_minutes} นาที ({notify_str})"
+        )
+
+    if action == "list_routines":
+        return _list_routines(db, user_id)
+
+    if action == "delete_routine":
+        rid = intent.get("routine_id")
+        if isinstance(rid, int):
+            return _delete_routine(db, user_id, rid)
+        return "บอก id กิจวัตรที่จะลบด้วยนะครับ เช่น 'ลบกิจวัตร 1'"
 
     if action == "help":
         return HELP_TEXT
