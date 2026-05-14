@@ -78,32 +78,41 @@ def check_routine_reminders(access_token: str) -> int:
 
         routines = db.query(Routine).all()
         for routine in routines:
-            if routine.days != "daily":
-                allowed = [d.strip() for d in routine.days.split(",")]
-                if today_weekday not in allowed:
+            try:
+                # Day-of-week filter
+                if routine.days != "daily":
+                    allowed = [d.strip() for d in routine.days.split(",")]
+                    if today_weekday not in allowed:
+                        continue
+
+                # Duplicate prevention
+                if routine.last_notified_date == today_str:
                     continue
 
-            if routine.last_notified_date == today_str:
-                continue
+                # Clamp to valid time ranges (guard against bad AI data)
+                h = max(0, min(23, routine.time_hour))
+                m = max(0, min(59, routine.time_minute))
 
-            routine_dt = now.replace(
-                hour=routine.time_hour, minute=routine.time_minute, second=0, microsecond=0
-            )
-            notify_dt = routine_dt - timedelta(minutes=routine.advance_minutes)
-            delta = (now - notify_dt).total_seconds()
+                # Build routine_dt for today; if already past, use tomorrow
+                routine_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                if routine_dt <= now:
+                    routine_dt += timedelta(days=1)
 
-            if 0 <= delta < 300:  # within 5-minute cron window
-                text = (
-                    f"⏰ อย่าลืม{routine.title}นะ!\n"
-                    f"อีก {routine.advance_minutes} นาที "
-                    f"({routine.time_hour:02d}:{routine.time_minute:02d})"
-                )
-                try:
+                notify_dt = routine_dt - timedelta(minutes=routine.advance_minutes)
+                delta = (now - notify_dt).total_seconds()
+
+                if 0 <= delta < 300:  # within 5-minute cron window
+                    text = (
+                        f"⏰ อย่าลืม{routine.title}นะ!\n"
+                        f"อีก {routine.advance_minutes} นาที "
+                        f"({h:02d}:{m:02d})"
+                    )
                     _push(access_token, routine.user_id, text)
                     routine.last_notified_date = today_str
                     sent += 1
-                except Exception as e:
-                    print(f"[routine_reminder] failed for routine {routine.id}: {e}")
+
+            except Exception as e:
+                print(f"[routine_reminder] failed for routine {routine.id}: {e}")
 
         db.commit()
         return sent
@@ -112,7 +121,7 @@ def check_routine_reminders(access_token: str) -> int:
 
 
 def morning_digest(access_token: str) -> int:
-    """Send 8 AM morning summary to all users with pending tasks. Returns users notified."""
+    """Send 8 AM morning summary to all users with pending tasks or routines."""
     db = SessionLocal()
     sent = 0
     try:
@@ -122,10 +131,14 @@ def morning_digest(access_token: str) -> int:
         today_end = today_start + timedelta(days=1)
         start_utc = today_start.astimezone(pytz.utc).replace(tzinfo=None)
         end_utc = today_end.astimezone(pytz.utc).replace(tzinfo=None)
+        today_weekday = str(today_date.weekday())
 
+        # Collect all users who have tasks or routines
         user_ids = {
             uid for (uid,) in
             db.query(Task.user_id).filter(Task.done == False).distinct().all()  # noqa: E712
+        } | {
+            uid for (uid,) in db.query(Routine.user_id).distinct().all()
         }
 
         for user_id in user_ids:
@@ -145,8 +158,18 @@ def morning_digest(access_token: str) -> int:
                 .order_by(Task.deadline.asc())
                 .all()
             )
+            today_routines = (
+                db.query(Routine)
+                .filter(Routine.user_id == user_id)
+                .filter(
+                    (Routine.days == "daily") |
+                    Routine.days.contains(today_weekday)
+                )
+                .order_by(Routine.time_hour, Routine.time_minute)
+                .all()
+            )
 
-            if not today_tasks and not overdue_tasks:
+            if not today_tasks and not overdue_tasks and not today_routines:
                 continue
 
             day_name = THAI_DAYS[today_date.weekday()]
@@ -159,13 +182,18 @@ def morning_digest(access_token: str) -> int:
 
             if today_tasks:
                 lines.append("〰〰〰〰〰〰〰〰〰〰")
-                lines.append(f"📋 งานวันนี้ที่ต้องทำ ({len(today_tasks)} งาน)")
+                lines.append(f"📋 งานวันนี้ ({len(today_tasks)} งาน)")
                 lines.append("〰〰〰〰〰〰〰〰〰〰")
                 for i, t in enumerate(today_tasks):
                     num = NUMBERED[i] if i < len(NUMBERED) else f"{i + 1}."
                     t_local = pytz.utc.localize(t.deadline).astimezone(tz)
                     recur_icon = " 🔄" if t.recurring else ""
                     lines.append(f"{num} {t.title}{recur_icon} — {t_local.strftime('%H:%M')} น.")
+
+            if today_routines:
+                lines.append("\n🔔 กิจวัตรวันนี้:")
+                for r in today_routines:
+                    lines.append(f"  • {r.title} — {r.time_hour:02d}:{r.time_minute:02d} น.")
 
             if overdue_tasks:
                 lines.append("\n⚠️ งานที่เลยกำหนดแล้ว:")

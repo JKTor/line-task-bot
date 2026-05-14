@@ -4,6 +4,34 @@
 
 ---
 
+## [2026-05-15] — Session 3: QA + Bug fixes ครบระบบ
+
+### แก้ Bug (Critical)
+- **`check_routine_reminders` crash** ถ้า time_hour > 23: เพิ่ม clamp + try/except ต่อ routine
+- **Midnight-crossing routine ไม่ส่ง**: routine ตี 1 advance 30 นาที ไม่เคยได้แจ้งเตือน — แก้โดย detect ว่า routine time ผ่านแล้วให้ใช้พรุ่งนี้แทน
+- **`_mark_done` ซ้ำ**: mark done งานที่เสร็จแล้ว spawn recurring อีกรอบ — เพิ่ม early return
+
+### แก้ Bug (Medium)
+- **`_recurring_label` / `_next_recurring_deadline` crash**: "weekly:abc" → try/except ป้องกัน ValueError
+- **`_add_routine` clamp**: clamp time_hour/minute/advance ก่อน save ไม่ให้ค่าผิดเข้า DB
+
+### เพิ่มฟีเจอร์
+- **`ลบกิจวัตรทั้งหมด`**: handler ใหม่ทั้ง strict parser และ AI intent
+- **Morning digest แสดง routine**: เพิ่มรายการ routine ของวันในข้อความเช้า
+- **Notify str "(วันก่อน)"**: แสดงหมายเหตุถ้าแจ้งเตือนข้ามคืน
+
+### ปรับปรุง AI Prompt
+- ชี้แจดความแตกต่าง routine vs recurring task ให้ชัดขึ้น (กิจวัตร = นิสัย ไม่ต้อง done; งานซ้ำ = มี deadline ต้อง done)
+- เพิ่ม examples ที่ชัดเจนกว่าเดิม
+- เพิ่ม delete_all_routines intent
+
+### ไฟล์ที่แก้ไข
+- `app/line_handler.py` — mark_done check, delete_all_routines, clamp, try/except
+- `app/scheduler.py` — midnight fix, clamp, morning digest + routines
+- `app/ai_parser.py` — prompt rewrite สำหรับ routine/recurring distinction
+
+---
+
 ## [2026-05-15] — Session 2: แก้ SSL bug + Routine ใช้งานได้
 
 ### แก้ Bug

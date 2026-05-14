@@ -21,13 +21,14 @@ HELP_TEXT = (
     "• ทั้งหมด — ดูงานที่ยังไม่เสร็จ\n"
     "• เสร็จ <id> — ทำเครื่องหมายเสร็จ\n"
     "• ลบ <id> — ลบงาน\n"
-    "• ยกเลิกซ้ำ <id> — หยุดการทำซ้ำของงาน\n"
+    "• ยกเลิกซ้ำ <id> — หยุดการทำซ้ำ\n"
     "• กิจวัตร — ดูกิจวัตรประจำวัน\n"
     "• ลบกิจวัตร <id> — ลบกิจวัตร\n"
+    "• ลบกิจวัตรทั้งหมด — ลบกิจวัตรทั้งหมด\n"
     "• ช่วยเหลือ — แสดงคำสั่งทั้งหมด\n\n"
-    "💡 พิมพ์ธรรมชาติก็ได้ เช่น 'พรุ่งนี้ลืมส่งรายงาน 6 โมงเย็น'\n"
-    "🔄 งานซ้ำ: 'ออกกำลังกายทุกวัน 6 โมงเช้า', 'ทุกจันทร์ประชุม 9 โมง'\n"
-    "🔔 กิจวัตร: 'ออกกำลังกายทุกวัน 18.00'"
+    "💡 พิมพ์ธรรมชาติก็ได้ เช่น 'พรุ่งนี้ส่งรายงาน 6 โมงเย็น'\n"
+    "🔄 งานซ้ำ: 'ส่งรายงานทุกวันศุกร์ 5 โมงเย็น'\n"
+    "🔔 กิจวัตร: 'ออกกำลังกายทุกวัน 18.00' (แจ้งเตือน ไม่ต้อง mark done)"
 )
 
 THAI_MONTHS = ["","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.",
@@ -83,37 +84,46 @@ def _recurring_label(recurring: str) -> str:
     if recurring == "daily":
         return "🔄 ซ้ำทุกวัน"
     if recurring.startswith("weekly:"):
-        day = THAI_WEEKDAYS[int(recurring.split(":")[1])]
-        return f"🔄 ซ้ำทุกวัน{day}"
+        try:
+            day = THAI_WEEKDAYS[int(recurring.split(":")[1])]
+            return f"🔄 ซ้ำทุกวัน{day}"
+        except (ValueError, IndexError):
+            return "🔄 ซ้ำรายสัปดาห์"
     if recurring.startswith("monthly:"):
-        day = recurring.split(":")[1]
-        return f"🔄 ซ้ำทุกวันที่ {day}"
+        try:
+            day = recurring.split(":")[1]
+            return f"🔄 ซ้ำทุกวันที่ {day}"
+        except IndexError:
+            return "🔄 ซ้ำรายเดือน"
     return "🔄 ซ้ำ"
 
 
 def _next_recurring_deadline(recurring: str, from_utc: datetime) -> Optional[datetime]:
     from_local = pytz.utc.localize(from_utc).astimezone(TZ)
-    if recurring == "daily":
-        next_local = from_local + timedelta(days=1)
-    elif recurring.startswith("weekly:"):
-        target_weekday = int(recurring.split(":")[1])
-        days_ahead = (target_weekday - from_local.weekday()) % 7
-        if days_ahead == 0:
-            days_ahead = 7
-        next_local = from_local + timedelta(days=days_ahead)
-    elif recurring.startswith("monthly:"):
-        target_day = int(recurring.split(":")[1])
-        if from_local.month == 12:
-            year, month = from_local.year + 1, 1
+    try:
+        if recurring == "daily":
+            next_local = from_local + timedelta(days=1)
+        elif recurring.startswith("weekly:"):
+            target_weekday = int(recurring.split(":")[1])
+            days_ahead = (target_weekday - from_local.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            next_local = from_local + timedelta(days=days_ahead)
+        elif recurring.startswith("monthly:"):
+            target_day = int(recurring.split(":")[1])
+            if from_local.month == 12:
+                year, month = from_local.year + 1, 1
+            else:
+                year, month = from_local.year, from_local.month + 1
+            max_day = calendar.monthrange(year, month)[1]
+            day = min(target_day, max_day)
+            next_naive = datetime(year, month, day, from_local.hour, from_local.minute)
+            next_local = TZ.localize(next_naive)
         else:
-            year, month = from_local.year, from_local.month + 1
-        max_day = calendar.monthrange(year, month)[1]
-        day = min(target_day, max_day)
-        next_naive = datetime(year, month, day, from_local.hour, from_local.minute)
-        next_local = TZ.localize(next_naive)
-    else:
+            return None
+        return next_local.astimezone(pytz.utc).replace(tzinfo=None)
+    except (ValueError, IndexError):
         return None
-    return next_local.astimezone(pytz.utc).replace(tzinfo=None)
 
 
 def _get_tasks_for_date(db: Session, user_id: str, target_date) -> List[Task]:
@@ -169,7 +179,8 @@ def _format_routine_days(days: str) -> str:
 def _routine_notify_str(time_hour: int, time_minute: int, advance_minutes: int) -> str:
     dummy = datetime(2000, 1, 1, time_hour, time_minute)
     notify = dummy - timedelta(minutes=advance_minutes)
-    return f"{notify.hour:02d}:{notify.minute:02d}"
+    suffix = " (วันก่อน)" if notify.date() < dummy.date() else ""
+    return f"{notify.hour:02d}:{notify.minute:02d}{suffix}"
 
 
 # ===== Task handlers =====
@@ -214,6 +225,8 @@ def _mark_done(db: Session, user_id: str, task_id: int) -> str:
     task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
     if not task:
         return f"ไม่เจองาน #{task_id}"
+    if task.done:
+        return f"งาน #{task_id} เสร็จแล้วนะครับ ✅"
     task.done = True
     task.completed_at = datetime.utcnow()
     db.commit()
@@ -271,6 +284,10 @@ def _add_routine(
     time_hour: int, time_minute: int,
     days: str = "daily", advance_minutes: int = 30,
 ) -> Routine:
+    # Clamp to valid ranges — guard against bad AI output
+    time_hour = max(0, min(23, time_hour))
+    time_minute = max(0, min(59, time_minute))
+    advance_minutes = max(1, min(1440, advance_minutes))
     routine = Routine(
         user_id=user_id, title=title,
         time_hour=time_hour, time_minute=time_minute,
@@ -312,6 +329,12 @@ def _delete_routine(db: Session, user_id: str, routine_id: int) -> str:
     return f"🗑️ ลบกิจวัตรแล้ว: #{routine_id} {title}"
 
 
+def _delete_all_routines(db: Session, user_id: str) -> str:
+    n = db.query(Routine).filter_by(user_id=user_id).delete()
+    db.commit()
+    return f"🗑️ ลบกิจวัตรทั้งหมดแล้ว ({n} รายการ)" if n else "ไม่มีกิจวัตรให้ลบ"
+
+
 # ===== Strict pattern matcher =====
 
 _THAI_TIME_WORDS = ("ทุ่ม", "บ่าย", "เย็น", "ตี ", "ตี1", "ตี2", "ตี3", "ตี4", "ตี5",
@@ -344,6 +367,9 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
         if rest.isdigit():
             return _mark_done(db, user_id, int(rest))
         return None
+
+    if text in ("ลบกิจวัตรทั้งหมด", "ลบกิจวัตรหมด"):
+        return _delete_all_routines(db, user_id)
 
     if text.startswith("ลบกิจวัตร"):
         rest = text[len("ลบกิจวัตร"):].strip()
@@ -390,6 +416,8 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
             return "ไม่เจอชื่องาน ลองพิมพ์ใหม่นะครับ"
         added = []
         for t in tasks_in:
+            if not isinstance(t, dict):
+                continue
             title = (t.get("title") or "").strip()
             if not title:
                 continue
@@ -442,10 +470,13 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
             return "ไม่เจอชื่อกิจวัตร ลองพิมพ์ใหม่นะครับ\nเช่น 'ออกกำลังกายทุกวัน 18.00'"
         time_str = (r.get("time") or "08:00").strip()
         try:
-            h, m = [int(x) for x in time_str.split(":")]
-        except Exception:
+            parts = time_str.split(":")
+            h, m = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+        except (ValueError, IndexError):
             h, m = 8, 0
         days = (r.get("days") or "daily").strip()
+        if not days:
+            days = "daily"
         try:
             advance = int(r.get("advance_minutes") or 30)
         except (TypeError, ValueError):
@@ -467,6 +498,9 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
         if isinstance(rid, int):
             return _delete_routine(db, user_id, rid)
         return "บอก id กิจวัตรที่จะลบด้วยนะครับ เช่น 'ลบกิจวัตร 1'"
+
+    if action == "delete_all_routines":
+        return _delete_all_routines(db, user_id)
 
     if action == "help":
         return HELP_TEXT

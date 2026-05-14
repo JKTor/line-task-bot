@@ -21,82 +21,63 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยแปลงข้อ�
 
 Schema:
 {
-  "intent": "add" | "list_today" | "list_all" | "done" | "delete" | "delete_all" | "done_all" | "cancel_recurring" | "add_routine" | "list_routines" | "delete_routine" | "help" | "unknown",
+  "intent": "add"|"list_today"|"list_all"|"done"|"delete"|"delete_all"|"done_all"|"cancel_recurring"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"help"|"unknown",
   "tasks": [{"title": "string", "deadline": "YYYY-MM-DD HH:MM" or null, "recurring": "daily"|"weekly:N"|"monthly:D"|null}],
   "task_id": integer or null,
   "routine": {"title": "string", "time": "HH:MM", "days": "daily|0|0,1,2,3,4", "advance_minutes": 30},
   "routine_id": integer or null,
-  "reply": "ข้อความตอบกลับสั้นๆ เป็นมิตร (optional)"
+  "reply": "ข้อความตอบกลับสั้นๆ (optional)"
 }
 
 กฎทั่วไป:
 - ถ้าผู้ใช้สั่งเพิ่มงานหลายอย่าง ให้ list หลายตัวใน tasks
-- ถ้าไม่ระบุเวลา ให้ deadline = null
-- ถ้าระบุแค่วันไม่ระบุเวลา ใช้ 23:59
-- ถ้าผู้ใช้พิมพ์งงๆ จับใจความไม่ได้ → intent="unknown"
+- ถ้าไม่ระบุเวลา ให้ deadline = null  |  ถ้าระบุแค่วัน ใช้ 23:59
+- ถ้าจับใจความไม่ได้ → intent="unknown"
 - intent="done"/"delete"/"cancel_recurring" ต้องมี task_id
+- intent="delete_routine" ต้องมี routine_id
 
-กฎงานซ้ำ (recurring) — สำคัญมาก อ่านให้ครบ:
-- "ทุกวัน" / "every day" / "daily" → recurring="daily" ⚠️ ต้องแปลงเวลาด้วยเสมอ
-- "ทุกจันทร์" / "every monday" → recurring="weekly:0"
-- "ทุกอังคาร" → recurring="weekly:1"
-- "ทุกพุธ" → recurring="weekly:2"
-- "ทุกพฤหัส" → recurring="weekly:3"
-- "ทุกศุกร์" → recurring="weekly:4"
-- "ทุกเสาร์" → recurring="weekly:5"
-- "ทุกอาทิตย์" → recurring="weekly:6"
-- "ทุกสัปดาห์" (ไม่ระบุวัน) → recurring="weekly:0" (จันทร์ default)
-- "ทุกวันที่ 15" → recurring="monthly:15"
-- "ทุกเดือน" (ไม่ระบุวันที่) → recurring="monthly:1"
-- deadline ของงานซ้ำ = วันพรุ่งนี้ (หรือวันถัดไปที่ตรงกับ weekday) + เวลาที่ระบุ
-- ⚠️ ห้าม deadline=null สำหรับงานซ้ำที่มีการระบุเวลา
-- "ยกเลิกซ้ำ 3" / "หยุดซ้ำงาน 3" → intent="cancel_recurring", task_id=3
+⚠️ กฎแยก "งานซ้ำ" vs "กิจวัตร" — สำคัญมาก:
+งานซ้ำ (add + recurring) = งาน/ภาระที่ต้อง mark done มี deadline จริง
+  ✅ ส่งรายงาน, ประชุม, ส่งการบ้าน, จ่ายบิล, นัดหมาย
+กิจวัตร (add_routine) = นิสัย/ไลฟ์สไตล์ที่แค่ต้องการ reminder ไม่ต้อง mark done
+  ✅ ออกกำลังกาย, กินยา, นอนหลับ, อ่านหนังสือ, วิ่ง, โยคะ, ทำสมาธิ
+ถ้าสงสัย: ถ้ามีคำว่า "ส่ง" / "ประชุม" / "นัด" → งานซ้ำ; ถ้ามีคำว่า "ออกกำลัง" / "กิน" / "นอน" / "อ่าน" / "วิ่ง" → กิจวัตร
 
-⚠️ การแปลงเวลาภาษาไทย (ใช้เป๊ะตามนี้):
-- "ตี 1" = 01:00, "ตี 2" = 02:00, "ตี 3" = 03:00, "ตี 4" = 04:00, "ตี 5" = 05:00
-- "6 โมงเช้า" = 06:00, "7 โมงเช้า" = 07:00, ... "11 โมงเช้า" = 11:00
-- "เช้า" (เฉยๆ) = 09:00, "สาย" = 10:00
-- "เที่ยง" / "เที่ยงวัน" = 12:00
-- "บ่ายโมง" / "บ่าย 1" = 13:00, "บ่าย 2" = 14:00, "บ่าย 3" = 15:00
-- "4 โมงเย็น" / "บ่าย 4" = 16:00, "5 โมงเย็น" = 17:00, "6 โมงเย็น" = 18:00
-- "เย็น" (เฉยๆ) = 18:00
-- "1 ทุ่ม" = 19:00, "2 ทุ่ม" = 20:00, "3 ทุ่ม" = 21:00, "4 ทุ่ม" = 22:00, "5 ทุ่ม" = 23:00 ⚠️ ทุ่ม ≠ โมงเย็น
-- "ค่ำ" = 20:00, "ดึก" = 23:00
-- "เที่ยงคืน" = 00:00
+กฎงานซ้ำ:
+- recurring="daily" | "weekly:N" (0=จันทร์…6=อาทิตย์) | "monthly:D"
+- deadline = วันถัดไปที่ตรง + เวลา  ⚠️ ห้าม null ถ้ามีเวลา
+- "ยกเลิกซ้ำ 3" → intent="cancel_recurring", task_id=3
 
-ตัวอย่าง:
+⚠️ การแปลงเวลาภาษาไทย:
+- "ตี 1-5" = 01:00-05:00  |  "X โมงเช้า" = 06:00-11:00
+- "เช้า"=09:00  "สาย"=10:00  "เที่ยง"=12:00
+- "บ่าย 1-4" = 13:00-16:00  |  "5-6 โมงเย็น" = 17:00-18:00  |  "เย็น"=18:00
+- "1-5 ทุ่ม" = 19:00-23:00  ⚠️ ทุ่ม ≠ โมงเย็น
+- "ค่ำ"=20:00  "ดึก"=23:00  "เที่ยงคืน"=00:00
+
+กิจวัตร days: "daily"|"0"(จันทร์)|"1"|"2"|"3"|"4"|"5"(เสาร์)|"6"(อาทิตย์)|"0,1,2,3,4"|"5,6"
+advance_minutes default=30 (แจ้งก่อน 30 นาที)
+
+ตัวอย่าง tasks:
 "พรุ่งนี้ส่งรายงาน 6 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<พรุ่งนี้> 18:00","recurring":null}]}
-"อ่านหนังสือ 4 ทุ่ม" → {"intent":"add","tasks":[{"title":"อ่านหนังสือ","deadline":"<วันนี้> 22:00","recurring":null}]}
-"ออกกำลังกายทุกวัน 6 โมงเช้า" → {"intent":"add","tasks":[{"title":"ออกกำลังกาย","deadline":"<พรุ่งนี้> 06:00","recurring":"daily"}]}
-"ออกกำลังกายทุกวัน 6 โมงเย็น" → {"intent":"add","tasks":[{"title":"ออกกำลังกาย","deadline":"<พรุ่งนี้> 18:00","recurring":"daily"}]}
-"วิ่งทุกวัน 7 โมงเช้า" → {"intent":"add","tasks":[{"title":"วิ่ง","deadline":"<พรุ่งนี้> 07:00","recurring":"daily"}]}
-"ทุกวันอ่านหนังสือ 3 ทุ่ม" → {"intent":"add","tasks":[{"title":"อ่านหนังสือ","deadline":"<พรุ่งนี้> 21:00","recurring":"daily"}]}
-"ทุกจันทร์ประชุมทีม 9 โมงเช้า" → {"intent":"add","tasks":[{"title":"ประชุมทีม","deadline":"<จันทร์หน้า> 09:00","recurring":"weekly:0"}]}
 "ทุกศุกร์ส่งรายงาน 5 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<ศุกร์หน้า> 17:00","recurring":"weekly:4"}]}
+"ทุกจันทร์ประชุมทีม 9 โมง" → {"intent":"add","tasks":[{"title":"ประชุมทีม","deadline":"<จันทร์หน้า> 09:00","recurring":"weekly:0"}]}
 "วันนี้มีอะไรบ้าง" → {"intent":"list_today"}
 "งานทั้งหมด" → {"intent":"list_all"}
 "งาน 3 เสร็จแล้ว" → {"intent":"done","task_id":3}
 "ลบงานที่ 2" → {"intent":"delete","task_id":2}
-"ลบทั้งหมด" / "ลบงานทั้งหมด" → {"intent":"delete_all"}
-"เคลียร์งานหมดเลย" → {"intent":"delete_all"}
-"ปิดงานทั้งหมด" / "เสร็จหมดแล้ว" → {"intent":"done_all"}
+"ลบทั้งหมด"/"เคลียร์งานหมด" → {"intent":"delete_all"}
+"ปิดงานทั้งหมด"/"เสร็จหมดแล้ว" → {"intent":"done_all"}
 "ยกเลิกซ้ำงาน 3" → {"intent":"cancel_recurring","task_id":3}
-"ช่วยอะไรได้บ้าง" → {"intent":"help"}
 
-⚠️ กิจวัตร (Routine) — แตกต่างจากงานซ้ำ: กิจวัตรคือกิจกรรมส่วนตัวที่ทำทุกวัน/รายสัปดาห์ ไม่มี deadline ไม่ mark done:
-days encoding (weekday 0=จันทร์ … 6=อาทิตย์):
-- "ทุกวัน" → "daily"
-- "ทุกวันจันทร์" → "0", "ทุกวันอังคาร" → "1", "ทุกวันพุธ" → "2"
-- "ทุกวันพฤหัส" → "3", "ทุกวันศุกร์" → "4"
-- "ทุกวันเสาร์" → "5", "ทุกวันอาทิตย์" → "6"
-- "วันจันทร์-ศุกร์" → "0,1,2,3,4"  |  "วันเสาร์-อาทิตย์" → "5,6"
-- advance_minutes default = 30 (แจ้งก่อน 30 นาที) เว้นแต่ผู้ใช้ระบุ
-
-"ออกกำลังกายทุกวัน 18.00" → {"intent":"add_routine","routine":{"title":"ออกกำลังกาย","time":"18:00","days":"daily","advance_minutes":30}}
-"ประชุมทุกวันจันทร์ 9 โมงเช้า" → {"intent":"add_routine","routine":{"title":"ประชุม","time":"09:00","days":"0","advance_minutes":30}}
-"อ่านหนังสือทุกคืน 4 ทุ่ม แจ้งก่อน 1 ชั่วโมง" → {"intent":"add_routine","routine":{"title":"อ่านหนังสือ","time":"22:00","days":"daily","advance_minutes":60}}
-"ดูกิจวัตรของฉัน" / "กิจวัตรมีอะไรบ้าง" → {"intent":"list_routines"}
+ตัวอย่าง routines:
+"ออกกำลังกายทุกวัน 18:00" → {"intent":"add_routine","routine":{"title":"ออกกำลังกาย","time":"18:00","days":"daily","advance_minutes":30}}
+"วิ่งทุกเช้า 6 โมง" → {"intent":"add_routine","routine":{"title":"วิ่ง","time":"06:00","days":"daily","advance_minutes":30}}
+"กินยาทุกวัน ตี 1 แจ้งก่อน 15 นาที" → {"intent":"add_routine","routine":{"title":"กินยา","time":"01:00","days":"daily","advance_minutes":15}}
+"โยคะทุกเสาร์-อาทิตย์ 7 โมงเช้า" → {"intent":"add_routine","routine":{"title":"โยคะ","time":"07:00","days":"5,6","advance_minutes":30}}
+"กิจวัตรของฉัน"/"กิจวัตรมีอะไร" → {"intent":"list_routines"}
 "ลบกิจวัตรที่ 2" → {"intent":"delete_routine","routine_id":2}
+"ลบกิจวัตรทั้งหมด" → {"intent":"delete_all_routines"}
 """
 
 
