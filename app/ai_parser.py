@@ -21,7 +21,7 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยแปลงข้อ�
 
 Schema:
 {
-  "intent": "add"|"list_today"|"list_all"|"done"|"delete"|"delete_all"|"done_all"|"cancel_recurring"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"help"|"unknown",
+  "intent": "add"|"list_today"|"list_tomorrow"|"list_week"|"list_all"|"done"|"delete"|"delete_all"|"done_all"|"cancel_recurring"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"help"|"unknown",
   "tasks": [{"title": "string", "deadline": "YYYY-MM-DD HH:MM" or null, "recurring": "daily"|"weekly:N"|"monthly:D"|null}],
   "task_id": integer or null,
   "routine": {"title": "string", "time": "HH:MM", "days": "daily|0|0,1,2,3,4", "advance_minutes": 30},
@@ -62,8 +62,10 @@ advance_minutes default=30 (แจ้งก่อน 30 นาที)
 "พรุ่งนี้ส่งรายงาน 6 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<พรุ่งนี้> 18:00","recurring":null}]}
 "ทุกศุกร์ส่งรายงาน 5 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<ศุกร์หน้า> 17:00","recurring":"weekly:4"}]}
 "ทุกจันทร์ประชุมทีม 9 โมง" → {"intent":"add","tasks":[{"title":"ประชุมทีม","deadline":"<จันทร์หน้า> 09:00","recurring":"weekly:0"}]}
-"วันนี้มีอะไรบ้าง" → {"intent":"list_today"}
-"งานทั้งหมด" → {"intent":"list_all"}
+"วันนี้มีอะไรบ้าง"/"งานวันนี้" → {"intent":"list_today"}
+"งานพรุ่งนี้"/"ดูงานวันพรุ่งนี้"/"พรุ่งนี้มีอะไร" → {"intent":"list_tomorrow"}
+"งานอาทิตย์นี้"/"สัปดาห์นี้มีงานอะไร"/"7 วันข้างหน้า" → {"intent":"list_week"}
+"งานทั้งหมด"/"มีงานอะไรบ้าง" → {"intent":"list_all"}
 "งาน 3 เสร็จแล้ว" → {"intent":"done","task_id":3}
 "ลบงานที่ 2" → {"intent":"delete","task_id":2}
 "ลบทั้งหมด"/"เคลียร์งานหมด" → {"intent":"delete_all"}

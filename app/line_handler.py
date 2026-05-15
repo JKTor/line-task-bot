@@ -18,7 +18,9 @@ HELP_TEXT = (
     "📝 คำสั่งที่ใช้ได้:\n"
     "• เพิ่ม <งาน> [วันเวลา] — เช่น เพิ่ม ส่งรายงาน พรุ่งนี้ 18:00\n"
     "• วันนี้ — ดูงานวันนี้\n"
-    "• ทั้งหมด — ดูงานที่ยังไม่เสร็จ\n"
+    "• พรุ่งนี้ — ดูงานพรุ่งนี้\n"
+    "• อาทิตย์นี้ — ดูงาน 7 วันข้างหน้า\n"
+    "• ทั้งหมด — ดูงานที่ยังไม่เสร็จทั้งหมด\n"
     "• เสร็จ <id> — ทำเครื่องหมายเสร็จ\n"
     "• ลบ <id> — ลบงาน\n"
     "• ยกเลิกซ้ำ <id> — หยุดการทำซ้ำ\n"
@@ -211,6 +213,40 @@ def _list_today(db: Session, user_id: str) -> str:
     return _list_message(tasks, f"📅 งานวันนี้ ({today_local.strftime('%d/%m')})")
 
 
+def _list_tomorrow(db: Session, user_id: str) -> str:
+    tomorrow_local = (now_local() + timedelta(days=1)).date()
+    start_local = now_local().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    end_local = start_local + timedelta(days=1)
+    start_utc = start_local.astimezone(pytz.utc).replace(tzinfo=None)
+    end_utc = end_local.astimezone(pytz.utc).replace(tzinfo=None)
+    tasks = (
+        db.query(Task)
+        .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+        .filter(Task.deadline.isnot(None))
+        .filter(Task.deadline >= start_utc, Task.deadline < end_utc)
+        .order_by(Task.deadline.asc())
+        .all()
+    )
+    return _list_message(tasks, f"📅 งานพรุ่งนี้ ({tomorrow_local.strftime('%d/%m')})")
+
+
+def _list_this_week(db: Session, user_id: str) -> str:
+    now = now_local()
+    start_local = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_local = start_local + timedelta(days=7)
+    start_utc = start_local.astimezone(pytz.utc).replace(tzinfo=None)
+    end_utc = end_local.astimezone(pytz.utc).replace(tzinfo=None)
+    tasks = (
+        db.query(Task)
+        .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+        .filter(Task.deadline.isnot(None))
+        .filter(Task.deadline >= start_utc, Task.deadline < end_utc)
+        .order_by(Task.deadline.asc())
+        .all()
+    )
+    return _list_message(tasks, "📅 งาน 7 วันข้างหน้า")
+
+
 def _list_all(db: Session, user_id: str) -> str:
     tasks = (
         db.query(Task)
@@ -356,10 +392,17 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
         task = _add_task(db, user_id, title, deadline)
         return _format_add_beautiful(db, user_id, task)
 
-    if text in ("วันนี้", "today"):
+    if text in ("วันนี้", "today", "งานวันนี้", "ดูงานวันนี้"):
         return _list_today(db, user_id)
 
-    if text in ("ทั้งหมด", "all", "list"):
+    if ("พรุ่งนี้" in text or "tomorrow" in lower) and ("ลบ" not in text and "เพิ่ม" not in text):
+        return _list_tomorrow(db, user_id)
+
+    if (any(w in text for w in ("อาทิต", "สัปดาห์", "week")) and
+            ("ลบ" not in text and "เพิ่ม" not in text)):
+        return _list_this_week(db, user_id)
+
+    if text in ("ทั้งหมด", "all", "list", "งานทั้งหมด", "ดูงานทั้งหมด"):
         return _list_all(db, user_id)
 
     if text.startswith("เสร็จ") or lower.startswith("done "):
@@ -434,6 +477,12 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
 
     if action == "list_today":
         return _list_today(db, user_id)
+
+    if action == "list_tomorrow":
+        return _list_tomorrow(db, user_id)
+
+    if action == "list_week":
+        return _list_this_week(db, user_id)
 
     if action == "list_all":
         return _list_all(db, user_id)
