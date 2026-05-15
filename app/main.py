@@ -1,12 +1,11 @@
 import os
+import pathlib
 from datetime import datetime, timedelta
 from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, Form, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from linebot.v3 import WebhookParser
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
@@ -19,18 +18,8 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from sqlalchemy.orm import Session
 
-from app.auth import (
-    create_session_token,
-    decode_session_token,
-    exchange_code_for_profile,
-    get_line_login_url,
-    get_or_create_user,
-    get_user_from_db,
-    is_plan_active,
-)
-from app.database import SessionLocal, get_db, init_db
+from app.database import get_db, init_db
 from app.line_handler import handle_command
-from app.middleware import check_can_add_task
 from app.models import Task, UnknownMessage, User
 from app.scheduler import (
     check_and_send_reminders,
@@ -39,6 +28,29 @@ from app.scheduler import (
     morning_digest,
     weekly_summary,
 )
+
+# Web UI dependencies — optional, won't crash LINE bot if missing
+try:
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.templating import Jinja2Templates
+    from app.auth import (
+        create_session_token, decode_session_token,
+        exchange_code_for_profile, get_line_login_url,
+        get_or_create_user, get_user_from_db, is_plan_active,
+    )
+    from app.middleware import check_can_add_task
+    _TMPL_DIR = pathlib.Path("app/templates")
+    templates = Jinja2Templates(directory=str(_TMPL_DIR)) if _TMPL_DIR.exists() else None
+    WEB_ENABLED = templates is not None
+    print(f"[startup] Web UI: {'enabled' if WEB_ENABLED else 'disabled (templates missing)'}")
+except Exception as _e:
+    print(f"[startup] Web UI disabled: {_e}")
+    templates = None
+    WEB_ENABLED = False
+
+
+def _no_web():
+    return JSONResponse({"error": "Web UI not available — check server logs"}, status_code=503)
 
 load_dotenv()
 
@@ -53,9 +65,7 @@ app = FastAPI(title="LINE Task Bot")
 parser = WebhookParser(CHANNEL_SECRET) if CHANNEL_SECRET else None
 line_config = Configuration(access_token=CHANNEL_ACCESS_TOKEN) if CHANNEL_ACCESS_TOKEN else None
 
-templates = Jinja2Templates(directory="app/templates")
-import pathlib as _pathlib
-if _pathlib.Path("app/static").exists():
+if WEB_ENABLED and pathlib.Path("app/static").exists():
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 ONBOARDING_MSG = (
@@ -72,7 +82,7 @@ ONBOARDING_MSG = (
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _get_session_user(session_token: Optional[str], db: Session) -> Optional[User]:
-    if not session_token:
+    if not WEB_ENABLED or not session_token:
         return None
     uid = decode_session_token(session_token)
     if not uid:
@@ -331,22 +341,23 @@ async def webhook(request: Request, x_line_signature: str = Header(None),
             user_id = event.source.user_id
             text = event.message.text or ""
 
-            # Auto-create user on first message
-            user, is_new = get_or_create_user(db, user_id)
-            if is_new:
-                reply = ONBOARDING_MSG
-                api.reply_message(ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[TextMessage(text=reply)]))
-                continue
-
-            # Subscription gating for add commands
-            if any(w in text for w in ("เพิ่ม", "add ")):
-                check = check_can_add_task(db, user_id)
-                if not check["ok"]:
+            # Auto-create user + onboarding (only when WEB_ENABLED)
+            if WEB_ENABLED:
+                user, is_new = get_or_create_user(db, user_id)
+                if is_new:
+                    reply = ONBOARDING_MSG
                     api.reply_message(ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text=check["message"])]))
+                        messages=[TextMessage(text=reply)]))
+                    continue
+
+                # Subscription gating for add commands
+                if any(w in text for w in ("เพิ่ม", "add ")):
+                    check = check_can_add_task(db, user_id)
+                    if not check["ok"]:
+                        api.reply_message(ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text=check["message"])]))
                     continue
 
             try:
