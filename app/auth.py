@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import httpx
-from jose import JWTError, jwt
+import jwt as pyjwt
 from sqlalchemy.orm import Session
 
 from app.models import User
@@ -88,7 +88,7 @@ def get_or_create_user(db: Session, line_user_id: str,
 
 def create_session_token(line_user_id: str) -> str:
     expire = datetime.utcnow() + timedelta(days=JWT_EXPIRE_DAYS)
-    return jwt.encode(
+    return pyjwt.encode(
         {"sub": line_user_id, "exp": expire},
         JWT_SECRET,
         algorithm=JWT_ALGORITHM,
@@ -98,9 +98,9 @@ def create_session_token(line_user_id: str) -> str:
 def decode_session_token(token: str) -> Optional[str]:
     """Return line_user_id or None if invalid/expired."""
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload.get("sub")
-    except JWTError:
+    except Exception:
         return None
 
 
