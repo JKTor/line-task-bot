@@ -54,7 +54,9 @@ parser = WebhookParser(CHANNEL_SECRET) if CHANNEL_SECRET else None
 line_config = Configuration(access_token=CHANNEL_ACCESS_TOKEN) if CHANNEL_ACCESS_TOKEN else None
 
 templates = Jinja2Templates(directory="app/templates")
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+import pathlib as _pathlib
+if _pathlib.Path("app/static").exists():
+    app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 ONBOARDING_MSG = (
     f"สวัสดีครับ! 👋 ยินดีต้อนรับสู่ LINE Task Bot\n\n"
@@ -211,8 +213,8 @@ def dashboard_tasks(request: Request,
     now = now_local()
     now_utc = now.astimezone(pytz.utc).replace(tzinfo=None)
     start_utc = now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.utc).replace(tzinfo=None)
-    end_utc = start_utc + __import__('datetime').timedelta(days=1)
-    tmr_end = start_utc + __import__('datetime').timedelta(days=2)
+    end_utc = start_utc + timedelta(days=1)
+    tmr_end = start_utc + timedelta(days=2)
 
     q = db.query(Task).filter_by(user_id=user.line_user_id, done=False)
     if filter == "today":
