@@ -1,10 +1,12 @@
 """LINE Login OAuth2 + JWT session management."""
+import json
 import os
 import secrets
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
 from typing import Optional
 
-import httpx
 import jwt as pyjwt
 from sqlalchemy.orm import Session
 
@@ -28,44 +30,46 @@ def get_line_login_url() -> str:
     params = (
         f"response_type=code"
         f"&client_id={LINE_LOGIN_CLIENT_ID}"
-        f"&redirect_uri={CALLBACK_URL}"
+        f"&redirect_uri={urllib.parse.quote(CALLBACK_URL, safe='')}"
         f"&state={state}"
         f"&scope=profile%20openid"
     )
     return f"{LINE_AUTHORIZE_URL}?{params}"
 
 
-async def exchange_code_for_profile(code: str) -> Optional[dict]:
-    """Exchange auth code for LINE profile. Returns profile dict or None."""
-    async with httpx.AsyncClient() as client:
-        try:
-            token_resp = await client.post(LINE_TOKEN_URL, data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": CALLBACK_URL,
-                "client_id": LINE_LOGIN_CLIENT_ID,
-                "client_secret": LINE_LOGIN_SECRET,
-            })
-            if token_resp.status_code != 200:
-                print(f"[auth] token exchange failed: {token_resp.text}")
-                return None
-            access_token = token_resp.json().get("access_token")
-
-            profile_resp = await client.get(
-                LINE_PROFILE_URL,
-                headers={"Authorization": f"Bearer {access_token}"}
-            )
-            if profile_resp.status_code != 200:
-                return None
-            return profile_resp.json()
-        except Exception as e:
-            print(f"[auth] error: {e}")
+def exchange_code_for_profile(code: str) -> Optional[dict]:
+    """Exchange auth code for LINE profile using stdlib urllib."""
+    try:
+        # Step 1: get access token
+        data = urllib.parse.urlencode({
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": CALLBACK_URL,
+            "client_id": LINE_LOGIN_CLIENT_ID,
+            "client_secret": LINE_LOGIN_SECRET,
+        }).encode()
+        req = urllib.request.Request(LINE_TOKEN_URL, data=data, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            token_data = json.loads(resp.read())
+        access_token = token_data.get("access_token")
+        if not access_token:
             return None
+
+        # Step 2: get profile
+        req2 = urllib.request.Request(
+            LINE_PROFILE_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        with urllib.request.urlopen(req2, timeout=10) as resp2:
+            return json.loads(resp2.read())
+    except Exception as e:
+        print(f"[auth] error: {e}")
+        return None
 
 
 def get_or_create_user(db: Session, line_user_id: str,
                         display_name: str = "", picture_url: str = "") -> tuple:
-    """Return (user, is_new). Creates user record if first time."""
+    """Return (user, is_new)."""
     user = db.query(User).filter_by(line_user_id=line_user_id).first()
     is_new = False
     if not user:
@@ -96,7 +100,6 @@ def create_session_token(line_user_id: str) -> str:
 
 
 def decode_session_token(token: str) -> Optional[str]:
-    """Return line_user_id or None if invalid/expired."""
     try:
         payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload.get("sub")

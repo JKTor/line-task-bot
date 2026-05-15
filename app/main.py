@@ -133,11 +133,11 @@ def auth_line():
 
 
 @app.get("/auth/callback")
-async def auth_callback(code: str = "", state: str = "",
-                         db: Session = Depends(get_db)):
+def auth_callback(code: str = "", state: str = "",
+                   db: Session = Depends(get_db)):
     if not code:
         return RedirectResponse("/?error=no_code")
-    profile = await exchange_code_for_profile(code)
+    profile = exchange_code_for_profile(code)
     if not profile:
         return RedirectResponse("/?error=auth_failed")
 
