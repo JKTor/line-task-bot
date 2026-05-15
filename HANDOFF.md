@@ -74,24 +74,10 @@ POST /admin/activate                → activate plan manually
 
 ---
 
-## 🔧 สิ่งที่ต้องทำก่อนส่งให้ลูกค้าใช้ (บังคับ)
+## ✅ พร้อมใช้งานจริงแล้ว
 
-### 1. ตั้ง ENV ใหม่ใน Render (ยังไม่ได้ทำ)
-
-| Key | ค่า | ที่มา |
-|-----|-----|------|
-| `LINE_LOGIN_CLIENT_ID` | Channel ID | LINE Dev Console → LINE Login channel |
-| `LINE_LOGIN_SECRET` | Channel Secret | LINE Dev Console |
-| `JWT_SECRET` | random 32 chars | `openssl rand -hex 32` |
-| `APP_BASE_URL` | `https://line-task-bot-u5vn.onrender.com` | URL ของ Render |
-| `ADMIN_SECRET` | random string | ตั้งเอง |
-
-### 2. Setup LINE Login Channel (ยังไม่ได้ทำ)
-1. ไป developers.line.biz
-2. สร้าง **LINE Login channel** ใหม่ (ต่างจาก Messaging API)
-3. ตั้ง Callback URL: `https://line-task-bot-u5vn.onrender.com/auth/callback`
-4. เปิด scope: `profile`, `openid`
-5. Copy Client ID + Secret → ใส่ใน Render ENV
+- ENV 5 ตัวตั้งใน Render แล้ว ✅
+- LINE Login Channel สร้างและตั้ง Callback URL แล้ว ✅
 
 ---
 
