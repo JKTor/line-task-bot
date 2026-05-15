@@ -53,6 +53,55 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/admin/unknown")
+def admin_unknown(secret: str = "", resolved: bool = False, db: Session = Depends(get_db)):
+    """List unrecognized messages for bot improvement. ?resolved=true to see handled ones."""
+    if not CRON_SECRET or secret != CRON_SECRET:
+        raise HTTPException(401, "Unauthorized")
+    from app.models import UnknownMessage
+    msgs = (
+        db.query(UnknownMessage)
+        .filter(UnknownMessage.resolved == resolved)
+        .order_by(UnknownMessage.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        {
+            "id": m.id,
+            "text": m.text,
+            "ai_intent": m.ai_intent,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in msgs
+    ]
+
+
+@app.post("/admin/unknown/{msg_id}/resolve")
+def admin_resolve(msg_id: int, secret: str = "", db: Session = Depends(get_db)):
+    """Mark an unknown message as resolved (handled/noted)."""
+    if not CRON_SECRET or secret != CRON_SECRET:
+        raise HTTPException(401, "Unauthorized")
+    from app.models import UnknownMessage
+    msg = db.query(UnknownMessage).filter_by(id=msg_id).first()
+    if not msg:
+        raise HTTPException(404, "Not found")
+    msg.resolved = True
+    db.commit()
+    return {"ok": True, "id": msg_id}
+
+
+@app.delete("/admin/unknown/resolved")
+def admin_clear_resolved(secret: str = "", db: Session = Depends(get_db)):
+    """Delete all resolved unknown messages."""
+    if not CRON_SECRET or secret != CRON_SECRET:
+        raise HTTPException(401, "Unauthorized")
+    from app.models import UnknownMessage
+    n = db.query(UnknownMessage).filter_by(resolved=True).delete()
+    db.commit()
+    return {"ok": True, "deleted": n}
+
+
 @app.get("/debug/ai")
 def debug_ai():
     return {

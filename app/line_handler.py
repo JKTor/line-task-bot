@@ -11,7 +11,7 @@ import pytz
 from sqlalchemy.orm import Session
 
 from app import ai_parser
-from app.models import Routine, Task
+from app.models import Routine, Task, UnknownMessage
 from app.parser import TZ, format_deadline, now_local, parse_task
 
 HELP_TEXT = (
@@ -457,6 +457,16 @@ _THAI_TIME_WORDS = ("ทุ่ม", "บ่าย", "เย็น", "ตี ", "
                     "เช้า", "เที่ยง", "ค่ำ", "ดึก", "สาย", "โมง")
 
 
+def _log_unknown(db: Session, user_id: str, text: str, ai_intent: str = "unknown") -> None:
+    """Save unrecognized messages for later review and bot improvement."""
+    try:
+        msg = UnknownMessage(user_id=user_id, text=text[:1000], ai_intent=ai_intent)
+        db.add(msg)
+        db.commit()
+    except Exception as e:
+        print(f"[unknown_log] failed: {e}")
+
+
 def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
     lower = text.lower()
 
@@ -659,6 +669,8 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
     if action == "help":
         return HELP_TEXT
 
+    # Unknown intent — log for self-improvement review
+    _log_unknown(db, user_id, intent.get("_original_text", ""), action)
     if extra:
         return f"{extra}\n\n{HELP_TEXT}"
     return HELP_TEXT
@@ -677,6 +689,9 @@ def handle_command(db: Session, user_id: str, text: str) -> str:
 
     if ai_parser.is_enabled():
         intent = ai_parser.parse(text)
+        intent["_original_text"] = text  # pass through for unknown logging
         return _dispatch_ai(db, user_id, intent)
 
+    # Strict parser only, no AI — log as unknown
+    _log_unknown(db, user_id, text, "no_ai")
     return HELP_TEXT
