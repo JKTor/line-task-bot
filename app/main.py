@@ -12,6 +12,9 @@ from linebot.v3.messaging import (
     ApiClient,
     Configuration,
     MessagingApi,
+    MessageAction,
+    QuickReply,
+    QuickReplyItem,
     ReplyMessageRequest,
     TextMessage,
 )
@@ -361,7 +364,7 @@ async def webhook(request: Request, x_line_signature: str = Header(None),
                         api.reply_message(ReplyMessageRequest(
                             reply_token=event.reply_token,
                             messages=[TextMessage(text=check["message"])]))
-                    continue
+                        continue
 
             try:
                 reply = handle_command(db, user_id, text)
@@ -369,9 +372,18 @@ async def webhook(request: Request, x_line_signature: str = Header(None),
                 print(f"[webhook] handler error: {e}")
                 reply = "เกิดข้อผิดพลาด ลองใหม่อีกครั้งนะครับ"
 
+            if isinstance(reply, dict):
+                qr_items = reply.get("quick_reply", [])
+                qr = QuickReply(items=[
+                    QuickReplyItem(action=MessageAction(label=item["label"], text=item["text"]))
+                    for item in qr_items
+                ]) if qr_items else None
+                msg = TextMessage(text=reply["text"], quick_reply=qr)
+            else:
+                msg = TextMessage(text=reply)
             api.reply_message(ReplyMessageRequest(
                 reply_token=event.reply_token,
-                messages=[TextMessage(text=reply)]))
+                messages=[msg]))
     return {"ok": True}
 
 

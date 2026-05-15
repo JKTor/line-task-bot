@@ -12,3 +12,4 @@ PyJWT==2.8.0
 jinja2==3.1.4
 aiofiles==23.2.1
 python-multipart==0.0.9
+notion-client==2.2.1

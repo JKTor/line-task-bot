@@ -11,7 +11,7 @@ import pytz
 from sqlalchemy.orm import Session
 
 from app import ai_parser
-from app.models import Routine, Task, UnknownMessage
+from app.models import Routine, Task, UnknownMessage, User
 from app.parser import TZ, format_deadline, now_local, parse_task
 
 HELP_TEXT = (
@@ -147,10 +147,19 @@ def _get_tasks_for_date(db: Session, user_id: str, target_date) -> List[Task]:
     )
 
 
-def _format_add_beautiful(db: Session, user_id: str, new_task: Task) -> str:
+def _task_quick_reply(task_id: int) -> list:
+    return [
+        {"label": f"✅ เสร็จ #{task_id}", "text": f"เสร็จ {task_id}"},
+        {"label": f"📅 เลื่อน #{task_id}", "text": f"เลื่อนงาน {task_id}"},
+        {"label": f"🗑️ ลบ #{task_id}", "text": f"ลบ {task_id}"},
+    ]
+
+
+def _format_add_beautiful(db: Session, user_id: str, new_task: Task) -> dict:
     recur_str = f"\n{_recurring_label(new_task.recurring)}" if new_task.recurring else ""
     if not new_task.deadline:
-        return f"✅ เพิ่มงานแล้ว!\n📋 #{new_task.id} {new_task.title}{recur_str}\n(ไม่มีกำหนดส่ง)"
+        text = f"✅ เพิ่มงานแล้ว!\n📋 #{new_task.id} {new_task.title}{recur_str}\n(ไม่มีกำหนดส่ง)"
+        return {"text": text, "quick_reply": _task_quick_reply(new_task.id)}
     local_dt = pytz.utc.localize(new_task.deadline).astimezone(TZ)
     target_date = local_dt.date()
     label = _label_for_date(target_date)
@@ -173,7 +182,8 @@ def _format_add_beautiful(db: Session, user_id: str, new_task: Task) -> str:
             recur_icon = " 🔄" if t.recurring else ""
             lines.append(f"{num} {t.title}{recur_icon} — {t_local.strftime('%H:%M')} น.")
         summary = "\n".join(lines)
-    return f"✅ เพิ่มงานแล้ว!\n\n{added_block}{summary}\n\n💪 สู้ๆ นะ!"
+    text = f"✅ เพิ่มงานแล้ว!\n\n{added_block}{summary}\n\n💪 สู้ๆ นะ!"
+    return {"text": text, "quick_reply": _task_quick_reply(new_task.id)}
 
 
 def _format_routine_days(days: str) -> str:
@@ -201,6 +211,13 @@ def _add_task(db: Session, user_id: str, title: str, deadline: Optional[datetime
     db.add(task)
     db.commit()
     db.refresh(task)
+    try:
+        from app import notion_sync
+        user = db.query(User).filter_by(line_user_id=user_id).first()
+        if user and user.notion_token and user.notion_db_id:
+            notion_sync.sync_task(user.notion_token, user.notion_db_id, title, deadline)
+    except Exception as e:
+        print(f"[notion] sync error: {e}")
     return task
 
 
@@ -773,7 +790,7 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
 
 # ===== Public entry point =====
 
-def handle_command(db: Session, user_id: str, text: str) -> str:
+def handle_command(db: Session, user_id: str, text: str):
     text = text.strip()
     if not text:
         return HELP_TEXT

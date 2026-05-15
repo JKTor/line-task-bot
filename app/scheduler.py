@@ -12,13 +12,23 @@ from linebot.v3.messaging import (
 )
 
 from app.database import SessionLocal
-from app.models import Routine, Task
+from app.models import Routine, Task, User
 from app.parser import format_deadline, now_local
 
 THAI_DAYS = ["จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์","อาทิตย์"]
 THAI_MONTHS = ["","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.",
                "ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]
 NUMBERED = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+
+
+def _in_quiet_hours(quiet_start, quiet_end, current_hour: int) -> bool:
+    if quiet_start is None or quiet_end is None:
+        return False
+    if quiet_start < quiet_end:
+        return quiet_start <= current_hour < quiet_end
+    if quiet_start > quiet_end:  # wraps midnight e.g. 22–08
+        return current_hour >= quiet_start or current_hour < quiet_end
+    return False
 
 
 def _push(access_token: str, user_id: str, text: str) -> None:
@@ -46,7 +56,15 @@ def check_and_send_reminders(access_token: str) -> int:
             .filter(Task.deadline <= soon_utc)
             .all()
         )
+        current_hour = now_local().hour
+        user_quiet: dict = {}
         for task in due_tasks:
+            if task.user_id not in user_quiet:
+                u = db.query(User).filter_by(line_user_id=task.user_id).first()
+                user_quiet[task.user_id] = (u.quiet_start if u else None, u.quiet_end if u else None)
+            qs, qe = user_quiet[task.user_id]
+            if _in_quiet_hours(qs, qe, current_hour):
+                continue
             overdue = task.deadline < now_utc
             prefix = "⏰ ใกล้ครบกำหนด!" if not overdue else "🚨 เลยกำหนดแล้ว!"
             text = (
@@ -82,8 +100,16 @@ def check_overdue_followup(access_token: str) -> int:
             .filter(Task.deadline < now_utc)
             .all()
         )
+        current_hour = now_local().hour
+        user_quiet: dict = {}
         for task in overdue_tasks:
             if getattr(task, "overdue_notified_date", None) == today_str:
+                continue
+            if task.user_id not in user_quiet:
+                u = db.query(User).filter_by(line_user_id=task.user_id).first()
+                user_quiet[task.user_id] = (u.quiet_start if u else None, u.quiet_end if u else None)
+            qs, qe = user_quiet[task.user_id]
+            if _in_quiet_hours(qs, qe, current_hour):
                 continue
             delta_days = (now_utc - task.deadline).days
             text = (
@@ -139,6 +165,9 @@ def check_routine_reminders(access_token: str) -> int:
                 delta = (now - notify_dt).total_seconds()
 
                 if 0 <= delta < 300:  # within 5-minute cron window
+                    u = db.query(User).filter_by(line_user_id=routine.user_id).first()
+                    if u and _in_quiet_hours(u.quiet_start, u.quiet_end, now.hour):
+                        continue
                     text = (
                         f"⏰ อย่าลืม{routine.title}นะ!\n"
                         f"อีก {routine.advance_minutes} นาที "
