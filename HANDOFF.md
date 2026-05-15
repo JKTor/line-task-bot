@@ -5,7 +5,7 @@
 
 ---
 
-## ✅ SaaS Foundation เสร็จแล้ว (commit 09b2080)
+## ✅ เสร็จทั้งหมดแล้ว (commit af0d428)
 
 ### สิ่งที่ทำเสร็จ
 
@@ -27,6 +27,19 @@
 
 **Admin:**
 - `POST /admin/activate` → set plan + expiry (manual payment flow)
+
+**Quick Reply Buttons (commit af0d428):**
+- หลังเพิ่มงาน มีปุ่ม [✅ เสร็จ #id] [📅 เลื่อน #id] [🗑️ ลบ #id]
+- แก้ bug: subscription gating `continue` ผิดตำแหน่ง ทำให้คำสั่ง "เพิ่ม" ไม่ถูก process
+
+**Notion Sync (commit af0d428):**
+- `app/notion_sync.py` — sync task ไป Notion อัตโนมัติเมื่อเพิ่มงาน
+- เฉพาะ pro user ที่มี notion_token + notion_db_id ใน dashboard
+- sync ชื่องาน + Due Date (ถ้า database มี property ชื่อ "Due Date")
+
+**Quiet Hours enforcement (commit af0d428):**
+- `scheduler.py` เช็ค quiet_start/quiet_end ก่อนส่ง reminder ทุกประเภท
+- รองรับช่วงที่ข้ามเที่ยงคืน เช่น 22:00–08:00
 
 ---
 
@@ -61,32 +74,33 @@ POST /admin/activate                → activate plan manually
 
 ---
 
-## 🔧 TODO ต่อใน session หน้า
+## 🔧 สิ่งที่ต้องทำก่อนส่งให้ลูกค้าใช้ (บังคับ)
 
-### 1. Quick Reply Buttons (PRD §20)
-หลังเพิ่มงาน ให้มีปุ่ม [เสร็จแล้ว] [เลื่อน] [ลบ]
+### 1. ตั้ง ENV ใหม่ใน Render (ยังไม่ได้ทำ)
 
-**วิธีทำ:**
-- แก้ `handle_command` → return dict แทน str:
-  `{"text": "...", "quick_reply": [{"label": "เสร็จแล้ว 1", "text": "เสร็จ 1"}]}`
-- แก้ webhook ใน `main.py` ใช้ `QuickReply` จาก LINE SDK:
-  ```python
-  from linebot.v3.messaging import QuickReply, QuickReplyItem, MessageAction
-  ```
-- Files: `app/line_handler.py`, `app/main.py`
+| Key | ค่า | ที่มา |
+|-----|-----|------|
+| `LINE_LOGIN_CLIENT_ID` | Channel ID | LINE Dev Console → LINE Login channel |
+| `LINE_LOGIN_SECRET` | Channel Secret | LINE Dev Console |
+| `JWT_SECRET` | random 32 chars | `openssl rand -hex 32` |
+| `APP_BASE_URL` | `https://line-task-bot-u5vn.onrender.com` | URL ของ Render |
+| `ADMIN_SECRET` | random string | ตั้งเอง |
 
-### 2. Notion Sync
-เมื่อ user มี notion_token → sync task ไป Notion อัตโนมัติ
-- แก้ `_add_task` ใน line_handler.py → เรียก `notion_sync.create_page()`
-- สร้าง `app/notion_sync.py`
-- install: `notion-client`
+### 2. Setup LINE Login Channel (ยังไม่ได้ทำ)
+1. ไป developers.line.biz
+2. สร้าง **LINE Login channel** ใหม่ (ต่างจาก Messaging API)
+3. ตั้ง Callback URL: `https://line-task-bot-u5vn.onrender.com/auth/callback`
+4. เปิด scope: `profile`, `openid`
+5. Copy Client ID + Secret → ใส่ใน Render ENV
 
-### 3. Clarify missing info (PRD §21)
+---
+
+## 🟡 TODO เพิ่มเติม (ทำทีหลังได้)
+
+### Clarify missing info (PRD §21)
 "เตือนส่งเอกสาร" → บอทถาม "ให้เตือนวันไหน?"
-
-### 4. Quiet Hours enforcement
-ตอนส่ง reminder → เช็ค user.quiet_start และ user.quiet_end ก่อน
-- แก้ `check_and_send_reminders` และ `check_routine_reminders` ใน `scheduler.py`
+- ต้องแก้ `ai_parser.py` SYSTEM_PROMPT ให้ return intent = "clarify" เมื่อข้อมูลไม่ครบ
+- webhook ใน `main.py` ต้องเก็บ context ของ conversation ไว้ชั่วคราว (ตอนนี้ stateless)
 
 ---
 
@@ -104,15 +118,16 @@ POST /admin/activate                → activate plan manually
 
 ```
 app/
-├── models.py      Task, Routine, UnknownMessage, User
-├── database.py    engine + SSL fix + migrate_db()
-├── auth.py        LINE Login OAuth + JWT session ← ใหม่
-├── middleware.py  subscription gating ← ใหม่
-├── line_handler.py handlers + AI dispatch
-├── ai_parser.py   SYSTEM_PROMPT + Groq/Gemini
-├── scheduler.py   reminders + digest
-├── parser.py      Thai date/time regex
-└── main.py        FastAPI + web routes + webhook
+├── models.py       Task, Routine, UnknownMessage, User
+├── database.py     engine + SSL fix + migrate_db()
+├── auth.py         LINE Login OAuth + JWT session
+├── middleware.py   subscription gating
+├── line_handler.py handlers + AI dispatch + quick reply
+├── notion_sync.py  Notion integration ← ใหม่
+├── ai_parser.py    SYSTEM_PROMPT + Groq/Gemini
+├── scheduler.py    reminders + digest + quiet hours
+├── parser.py       Thai date/time regex
+└── main.py         FastAPI + web routes + webhook
 app/templates/
 ├── base.html      nav + layout
 ├── landing.html   หน้าแรก + pricing
