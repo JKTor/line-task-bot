@@ -67,6 +67,43 @@ def check_and_send_reminders(access_token: str) -> int:
         db.close()
 
 
+def check_overdue_followup(access_token: str) -> int:
+    """Send daily follow-up for overdue tasks until done. Returns count sent."""
+    db = SessionLocal()
+    sent = 0
+    try:
+        now = now_local()
+        today_str = now.date().isoformat()
+        now_utc = now.astimezone(pytz.utc).replace(tzinfo=None)
+
+        overdue_tasks = (
+            db.query(Task)
+            .filter(Task.done == False, Task.deadline.isnot(None))  # noqa: E712
+            .filter(Task.deadline < now_utc)
+            .all()
+        )
+        for task in overdue_tasks:
+            if getattr(task, "overdue_notified_date", None) == today_str:
+                continue
+            delta_days = (now_utc - task.deadline).days
+            text = (
+                f"🚨 ยังไม่เสร็จ!\n"
+                f"#{task.id} {task.title}\n"
+                f"เลยกำหนดมาแล้ว {delta_days} วัน\n"
+                f"พิมพ์ 'เสร็จ {task.id}' เมื่อทำเสร็จแล้ว"
+            )
+            try:
+                _push(access_token, task.user_id, text)
+                task.overdue_notified_date = today_str
+                sent += 1
+            except Exception as e:
+                print(f"[overdue_followup] failed for task {task.id}: {e}")
+        db.commit()
+        return sent
+    finally:
+        db.close()
+
+
 def check_routine_reminders(access_token: str) -> int:
     """Send routine reminders when it's within the advance window. Returns count sent."""
     db = SessionLocal()

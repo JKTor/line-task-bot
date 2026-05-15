@@ -21,9 +21,12 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยแปลงข้อ�
 
 Schema:
 {
-  "intent": "add"|"list_today"|"list_tomorrow"|"list_week"|"list_overdue"|"list_date"|"list_all"|"done"|"delete"|"delete_all"|"done_all"|"snooze"|"cancel_recurring"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"update_routine"|"help"|"unknown",
-  "tasks": [{"title": "string", "deadline": "YYYY-MM-DD HH:MM" or null, "recurring": "daily"|"weekly:N"|"monthly:D"|null}],
+  "intent": "add"|"list_today"|"list_tomorrow"|"list_week"|"list_overdue"|"list_urgent"|"list_date"|"list_all"|"search"|"done"|"delete"|"delete_all"|"done_all"|"snooze"|"cancel_recurring"|"add_note"|"set_priority"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"update_routine"|"help"|"unknown",
+  "tasks": [{"title": "string", "deadline": "YYYY-MM-DD HH:MM" or null, "recurring": "daily"|"weekly:N"|"monthly:D"|null, "priority": "urgent"|"high"|"normal"|"low"|null, "note": "string"|null}],
   "task_id": integer or null,
+  "priority": "urgent"|"high"|"normal"|"low"|null,
+  "note": "string"|null,
+  "keyword": "string"|null,
   "routine": {"title": "string", "time": "HH:MM", "days": "daily|0|0,1,2,3,4", "advance_minutes": 30},
   "routine_id": integer or null,
   "date": "YYYY-MM-DD" or null,
@@ -36,6 +39,13 @@ Schema:
 - ถ้าจับใจความไม่ได้ → intent="unknown"
 - intent="done"/"delete"/"cancel_recurring" ต้องมี task_id
 - intent="delete_routine" ต้องมี routine_id
+- priority default = "normal" ถ้าไม่ระบุ
+
+กฎ priority:
+- "ด่วน"/"urgent"/"สำคัญมาก"/"ทำก่อน"/"urgent" → "urgent"
+- "สำคัญ"/"high"/"รีบ" → "high"
+- "ไม่รีบ"/"low"/"ทำทีหลัง" → "low"
+- ไม่ระบุ → "normal"
 
 ⚠️ กฎแยก "งานซ้ำ" vs "กิจวัตร" — สำคัญมาก:
 งานซ้ำ (add + recurring) = งาน/ภาระที่ต้อง mark done มี deadline จริง
@@ -64,18 +74,23 @@ advance_minutes default=30 (แจ้งก่อน 30 นาที)
 "ทุกศุกร์ส่งรายงาน 5 โมงเย็น" → {"intent":"add","tasks":[{"title":"ส่งรายงาน","deadline":"<ศุกร์หน้า> 17:00","recurring":"weekly:4"}]}
 "ทุกจันทร์ประชุมทีม 9 โมง" → {"intent":"add","tasks":[{"title":"ประชุมทีม","deadline":"<จันทร์หน้า> 09:00","recurring":"weekly:0"}]}
 "วันนี้มีอะไรบ้าง"/"งานวันนี้" → {"intent":"list_today"}
-"งานพรุ่งนี้"/"ดูงานวันพรุ่งนี้"/"พรุ่งนี้มีอะไร" → {"intent":"list_tomorrow"}
-"งานอาทิตย์นี้"/"สัปดาห์นี้"/"7 วันข้างหน้า" → {"intent":"list_week"}
-"งานที่ค้าง"/"เลยกำหนดมีอะไร"/"งานที่เลย" → {"intent":"list_overdue"}
+"งานพรุ่งนี้"/"พรุ่งนี้มีอะไร" → {"intent":"list_tomorrow"}
+"งานอาทิตย์นี้"/"สัปดาห์นี้" → {"intent":"list_week"}
+"งานที่ค้าง"/"เลยกำหนดมีอะไร" → {"intent":"list_overdue"}
+"งานด่วนมีอะไร"/"งาน priority สูง" → {"intent":"list_urgent"}
 "งานวันที่ 20"/"วัน 25 พ.ค. มีงานอะไร" → {"intent":"list_date","date":"YYYY-MM-20"}
 "งานทั้งหมด"/"มีงานอะไรบ้าง" → {"intent":"list_all"}
+"หางาน KBank"/"ค้นหางาน invoice" → {"intent":"search","keyword":"KBank"}
 "งาน 3 เสร็จแล้ว" → {"intent":"done","task_id":3}
 "ลบงานที่ 2" → {"intent":"delete","task_id":2}
 "ลบทั้งหมด"/"เคลียร์งานหมด" → {"intent":"delete_all"}
 "ปิดงานทั้งหมด"/"เสร็จหมดแล้ว" → {"intent":"done_all"}
 "เลื่อนงาน 3 เป็นพรุ่งนี้ 20:00" → {"intent":"snooze","task_id":3,"deadline":"<พรุ่งนี้> 20:00"}
-"เลื่อนงาน 5 ออกไป 2 วัน" → {"intent":"snooze","task_id":5,"deadline":"<วันนี้+2วัน> <เวลาเดิม>"}
 "ยกเลิกซ้ำงาน 3" → {"intent":"cancel_recurring","task_id":3}
+"เพิ่มโน้ต งาน 3 ว่า ติดต่อต้น" → {"intent":"add_note","task_id":3,"note":"ติดต่อต้น"}
+"ตั้งงาน 5 เป็น urgent"/"งาน 2 ด่วนมาก" → {"intent":"set_priority","task_id":5,"priority":"urgent"}
+"งานด่วน ส่งสัญญาก่อนเที่ยง" → {"intent":"add","tasks":[{"title":"ส่งสัญญา","deadline":"<วันนี้> 12:00","priority":"urgent"}]}
+"จดไว้ ซื้อยา ไม่รีบ" → {"intent":"add","tasks":[{"title":"ซื้อยา","deadline":null,"priority":"low"}]}
 
 ตัวอย่าง routines:
 "ออกกำลังกายทุกวัน 18:00" → {"intent":"add_routine","routine":{"title":"ออกกำลังกาย","time":"18:00","days":"daily","advance_minutes":30}}

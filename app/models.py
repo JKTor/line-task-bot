@@ -17,6 +17,9 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     recurring = Column(String(30), nullable=True)
     completed_at = Column(DateTime, nullable=True)
+    priority = Column(String(10), default="normal", nullable=False, server_default="normal")
+    note = Column(String(500), nullable=True)
+    overdue_notified_date = Column(String(10), nullable=True)
 
 
 class Routine(Base):

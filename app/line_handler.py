@@ -48,10 +48,15 @@ _ROUTINE_DAY_NAMES = {
 
 # ===== Helpers =====
 
+_PRIORITY_EMOJI = {"urgent": "🔴", "high": "🟠", "normal": "⬜", "low": "🔵"}
+_PRIORITY_VALID = {"urgent", "high", "normal", "low"}
+
+
 def _format_task_line(t: Task) -> str:
-    mark = "✅" if t.done else "⬜"
+    mark = "✅" if t.done else _PRIORITY_EMOJI.get(getattr(t, "priority", "normal") or "normal", "⬜")
     recur = " 🔄" if t.recurring else ""
-    return f"{mark} #{t.id} {t.title}{recur}  ⏰ {format_deadline(t.deadline)}"
+    note_mark = " 📝" if getattr(t, "note", None) else ""
+    return f"{mark} #{t.id} {t.title}{recur}{note_mark}  ⏰ {format_deadline(t.deadline)}"
 
 
 def _list_message(tasks: List[Task], header: str) -> str:
@@ -188,8 +193,11 @@ def _routine_notify_str(time_hour: int, time_minute: int, advance_minutes: int) 
 # ===== Task handlers =====
 
 def _add_task(db: Session, user_id: str, title: str, deadline: Optional[datetime],
-              recurring: Optional[str] = None) -> Task:
-    task = Task(user_id=user_id, title=title, deadline=deadline, recurring=recurring)
+              recurring: Optional[str] = None, priority: str = "normal",
+              note: Optional[str] = None) -> Task:
+    p = priority if priority in _PRIORITY_VALID else "normal"
+    task = Task(user_id=user_id, title=title, deadline=deadline, recurring=recurring,
+                priority=p, note=note)
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -289,6 +297,51 @@ def _list_all(db: Session, user_id: str) -> str:
         .all()
     )
     return _list_message(tasks, "📋 งานที่ยังไม่เสร็จ")
+
+
+def _list_urgent(db: Session, user_id: str) -> str:
+    tasks = (
+        db.query(Task)
+        .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+        .filter(Task.priority.in_(["urgent", "high"]))
+        .order_by(Task.priority.asc(), Task.deadline.is_(None), Task.deadline.asc())
+        .all()
+    )
+    return _list_message(tasks, "🔴 งานด่วน / สำคัญ")
+
+
+def _search_tasks(db: Session, user_id: str, keyword: str) -> str:
+    if not keyword:
+        return "ระบุ keyword ด้วยนะครับ เช่น 'หางาน KBank'"
+    kw = f"%{keyword}%"
+    tasks = (
+        db.query(Task)
+        .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+        .filter(Task.title.ilike(kw) | Task.note.ilike(kw))
+        .order_by(Task.deadline.is_(None), Task.deadline.asc())
+        .all()
+    )
+    return _list_message(tasks, f"🔍 ผลการค้นหา: {keyword}")
+
+
+def _add_note(db: Session, user_id: str, task_id: int, note_text: str) -> str:
+    task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
+    if not task:
+        return f"ไม่เจองาน #{task_id}"
+    task.note = note_text[:500]
+    db.commit()
+    return f"📝 เพิ่มโน้ตแล้ว: #{task_id} {task.title}\n{task.note}"
+
+
+def _set_priority(db: Session, user_id: str, task_id: int, priority: str) -> str:
+    task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
+    if not task:
+        return f"ไม่เจองาน #{task_id}"
+    p = priority if priority in _PRIORITY_VALID else "normal"
+    task.priority = p
+    db.commit()
+    emoji = _PRIORITY_EMOJI.get(p, "⬜")
+    return f"{emoji} ตั้ง priority แล้ว: #{task_id} {task.title} → {p}"
 
 
 def _mark_done(db: Session, user_id: str, task_id: int) -> str:
@@ -495,6 +548,25 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
     if any(w in text for w in ("ค้าง", "เลยกำหนด", "overdue", "เกินกำหนด")):
         return _list_overdue(db, user_id)
 
+    if any(w in text for w in ("ด่วน", "urgent", "สำคัญ", "งานด่วน")):
+        return _list_urgent(db, user_id)
+
+    if text.startswith("หางาน") or text.startswith("ค้นหา") or lower.startswith("search "):
+        kw = text[len("หางาน"):].strip() if text.startswith("หางาน") else \
+             text[len("ค้นหา"):].strip() if text.startswith("ค้นหา") else \
+             text[7:].strip()
+        if kw:
+            return _search_tasks(db, user_id, kw)
+        return None
+
+    if text.startswith("โน้ต") or text.startswith("เพิ่มโน้ต"):
+        prefix = "เพิ่มโน้ต" if text.startswith("เพิ่มโน้ต") else "โน้ต"
+        rest = text[len(prefix):].strip()
+        parts = rest.split(" ", 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            return _add_note(db, user_id, int(parts[0]), parts[1])
+        return None
+
     if text in ("ทั้งหมด", "all", "list", "งานทั้งหมด", "ดูงานทั้งหมด"):
         return _list_all(db, user_id)
 
@@ -559,7 +631,9 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
                 continue
             deadline = _ai_deadline_to_utc(t.get("deadline"))
             recurring = t.get("recurring") or None
-            saved = _add_task(db, user_id, title, deadline, recurring)
+            priority = (t.get("priority") or "normal").strip().lower()
+            note = t.get("note") or None
+            saved = _add_task(db, user_id, title, deadline, recurring, priority, note)
             added.append(saved)
         if not added:
             return "ไม่เจอชื่องาน ลองพิมพ์ใหม่นะครับ"
@@ -584,8 +658,29 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
         date_str = intent.get("date") or ""
         return _list_date(db, user_id, str(date_str))
 
+    if action == "list_urgent":
+        return _list_urgent(db, user_id)
+
     if action == "list_all":
         return _list_all(db, user_id)
+
+    if action == "search":
+        kw = (intent.get("keyword") or "").strip()
+        return _search_tasks(db, user_id, kw)
+
+    if action == "add_note":
+        tid = intent.get("task_id")
+        note_text = (intent.get("note") or "").strip()
+        if isinstance(tid, int) and note_text:
+            return _add_note(db, user_id, tid, note_text)
+        return "บอก id งานและโน้ตด้วยนะครับ เช่น 'เพิ่มโน้ต 3 ว่า ติดต่อต้น'"
+
+    if action == "set_priority":
+        tid = intent.get("task_id")
+        p = (intent.get("priority") or "normal").strip().lower()
+        if isinstance(tid, int):
+            return _set_priority(db, user_id, tid, p)
+        return "บอก id งานด้วยนะครับ เช่น 'ตั้ง priority งาน 3 เป็น urgent'"
 
     if action == "snooze":
         tid = intent.get("task_id")

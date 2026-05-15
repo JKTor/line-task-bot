@@ -18,6 +18,7 @@ from app.database import get_db, init_db
 from app.line_handler import handle_command
 from app.scheduler import (
     check_and_send_reminders,
+    check_overdue_followup,
     check_routine_reminders,
     morning_digest,
     weekly_summary,
@@ -161,6 +162,7 @@ def cron_check(secret: str = ""):
         raise HTTPException(500, "LINE access token not configured")
     sent = check_and_send_reminders(CHANNEL_ACCESS_TOKEN)
     sent += check_routine_reminders(CHANNEL_ACCESS_TOKEN)
+    sent += check_overdue_followup(CHANNEL_ACCESS_TOKEN)
     return {"ok": True, "reminders_sent": sent}
 
 

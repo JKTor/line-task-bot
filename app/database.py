@@ -54,6 +54,9 @@ def migrate_db() -> None:
     migrations = [
         "ALTER TABLE tasks ADD COLUMN recurring VARCHAR(30)",
         f"ALTER TABLE tasks ADD COLUMN completed_at {ts_type}",
+        "ALTER TABLE tasks ADD COLUMN priority VARCHAR(10) DEFAULT 'normal'",
+        "ALTER TABLE tasks ADD COLUMN note VARCHAR(500)",
+        "ALTER TABLE tasks ADD COLUMN overdue_notified_date VARCHAR(10)",
     ]
     with engine.connect() as conn:
         for stmt in migrations:
