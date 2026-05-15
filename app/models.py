@@ -36,6 +36,22 @@ class Routine(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    line_user_id = Column(String(64), unique=True, index=True, nullable=False)
+    display_name = Column(String(100), nullable=True)
+    picture_url = Column(String(300), nullable=True)
+    plan = Column(String(20), default="free", nullable=False)      # free | pro | team
+    plan_expires_at = Column(DateTime, nullable=True)              # null = forever
+    notion_token = Column(String(300), nullable=True)
+    notion_db_id = Column(String(100), nullable=True)
+    quiet_start = Column(Integer, nullable=True)                   # 0-23
+    quiet_end = Column(Integer, nullable=True)                     # 0-23
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class UnknownMessage(Base):
     __tablename__ = "unknown_messages"
 

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}LINE Task Bot{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Sarabun', sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen">
+  <nav class="bg-green-600 text-white px-6 py-3 flex justify-between items-center shadow">
+    <a href="/" class="font-bold text-xl">📋 LINE Task Bot</a>
+    <div class="flex gap-4 items-center">
+      {% if user %}
+        <span class="text-sm opacity-80">{{ user.display_name or user.line_user_id[:8] }}</span>
+        <span class="bg-white text-green-700 text-xs px-2 py-1 rounded font-bold uppercase">{{ user.plan }}</span>
+        <a href="/dashboard" class="text-sm hover:underline">ตั้งค่า</a>
+        <a href="/auth/logout" class="text-sm hover:underline opacity-70">ออกจากระบบ</a>
+      {% else %}
+        <a href="/auth/line" class="bg-white text-green-700 px-4 py-1 rounded font-semibold text-sm hover:bg-green-50">เข้าสู่ระบบ</a>
+      {% endif %}
+    </div>
+  </nav>
+  <main class="max-w-4xl mx-auto px-4 py-8">
+    {% if flash %}
+      <div class="mb-4 p-3 rounded bg-green-100 text-green-800 text-sm">{{ flash }}</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
