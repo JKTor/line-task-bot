@@ -247,6 +247,40 @@ def _list_this_week(db: Session, user_id: str) -> str:
     return _list_message(tasks, "📅 งาน 7 วันข้างหน้า")
 
 
+def _list_overdue(db: Session, user_id: str) -> str:
+    now_utc = now_local().astimezone(pytz.utc).replace(tzinfo=None)
+    tasks = (
+        db.query(Task)
+        .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+        .filter(Task.deadline.isnot(None))
+        .filter(Task.deadline < now_utc)
+        .order_by(Task.deadline.asc())
+        .all()
+    )
+    return _list_message(tasks, "🚨 งานที่เลยกำหนดแล้ว")
+
+
+def _list_date(db: Session, user_id: str, date_str: str) -> str:
+    try:
+        target = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return "ไม่เข้าใจวันที่ที่ระบุ ลองพิมพ์ใหม่นะครับ"
+    start_local = TZ.localize(datetime(target.year, target.month, target.day))
+    end_local = start_local + timedelta(days=1)
+    start_utc = start_local.astimezone(pytz.utc).replace(tzinfo=None)
+    end_utc = end_local.astimezone(pytz.utc).replace(tzinfo=None)
+    tasks = (
+        db.query(Task)
+        .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
+        .filter(Task.deadline.isnot(None))
+        .filter(Task.deadline >= start_utc, Task.deadline < end_utc)
+        .order_by(Task.deadline.asc())
+        .all()
+    )
+    label = _label_for_date(target)
+    return _list_message(tasks, f"📅 งาน{label} ({target.strftime('%d/%m')})")
+
+
 def _list_all(db: Session, user_id: str) -> str:
     tasks = (
         db.query(Task)
@@ -313,6 +347,21 @@ def _cancel_recurring(db: Session, user_id: str, task_id: int) -> str:
     return f"🔄❌ ยกเลิกการทำซ้ำแล้ว: #{task.id} {task.title}"
 
 
+def _snooze_task(db: Session, user_id: str, task_id: int, new_deadline_str: Optional[str]) -> str:
+    task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
+    if not task:
+        return f"ไม่เจองาน #{task_id}"
+    new_dl = _ai_deadline_to_utc(new_deadline_str)
+    if not new_dl:
+        return "ระบุวันที่ใหม่ด้วยนะครับ เช่น 'เลื่อนงาน 3 เป็นพรุ่งนี้ 18:00'"
+    task.deadline = new_dl
+    task.notified = False
+    db.commit()
+    local_dt = pytz.utc.localize(new_dl).astimezone(TZ)
+    label = _label_for_date(local_dt.date())
+    return f"📅 เลื่อนงาน #{task_id} แล้ว\n{task.title}\n⏰ {label} {local_dt.strftime('%H:%M')} น."
+
+
 # ===== Routine handlers =====
 
 def _add_routine(
@@ -371,6 +420,37 @@ def _delete_all_routines(db: Session, user_id: str) -> str:
     return f"🗑️ ลบกิจวัตรทั้งหมดแล้ว ({n} รายการ)" if n else "ไม่มีกิจวัตรให้ลบ"
 
 
+def _update_routine(db: Session, user_id: str, routine_id: int, updates: dict) -> str:
+    routine = db.query(Routine).filter_by(id=routine_id, user_id=user_id).first()
+    if not routine:
+        return f"ไม่เจอกิจวัตร #{routine_id}"
+    time_str = updates.get("time")
+    if time_str:
+        try:
+            parts = str(time_str).split(":")
+            h, m = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+            routine.time_hour = max(0, min(23, h))
+            routine.time_minute = max(0, min(59, m))
+        except (ValueError, IndexError):
+            pass
+    if updates.get("days"):
+        routine.days = updates["days"]
+    if updates.get("advance_minutes") is not None:
+        try:
+            routine.advance_minutes = max(1, min(1440, int(updates["advance_minutes"])))
+        except (TypeError, ValueError):
+            pass
+    routine.last_notified_date = None  # reset so new time fires correctly
+    db.commit()
+    notify_str = _routine_notify_str(routine.time_hour, routine.time_minute, routine.advance_minutes)
+    return (
+        f"✅ อัปเดตกิจวัตรแล้ว!\n"
+        f"🔔 #{routine.id} {routine.title} — "
+        f"{routine.time_hour:02d}:{routine.time_minute:02d} {_format_routine_days(routine.days)}\n"
+        f"⏰ แจ้งเตือนก่อน {routine.advance_minutes} นาที ({notify_str})"
+    )
+
+
 # ===== Strict pattern matcher =====
 
 _THAI_TIME_WORDS = ("ทุ่ม", "บ่าย", "เย็น", "ตี ", "ตี1", "ตี2", "ตี3", "ตี4", "ตี5",
@@ -401,6 +481,9 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
     if (any(w in text for w in ("อาทิต", "สัปดาห์", "week")) and
             ("ลบ" not in text and "เพิ่ม" not in text)):
         return _list_this_week(db, user_id)
+
+    if any(w in text for w in ("ค้าง", "เลยกำหนด", "overdue", "เกินกำหนด")):
+        return _list_overdue(db, user_id)
 
     if text in ("ทั้งหมด", "all", "list", "งานทั้งหมด", "ดูงานทั้งหมด"):
         return _list_all(db, user_id)
@@ -484,8 +567,30 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
     if action == "list_week":
         return _list_this_week(db, user_id)
 
+    if action == "list_overdue":
+        return _list_overdue(db, user_id)
+
+    if action == "list_date":
+        date_str = intent.get("date") or ""
+        return _list_date(db, user_id, str(date_str))
+
     if action == "list_all":
         return _list_all(db, user_id)
+
+    if action == "snooze":
+        tid = intent.get("task_id")
+        dl = intent.get("deadline")
+        if isinstance(tid, int):
+            return _snooze_task(db, user_id, tid, dl)
+        return "บอก id งานและวันที่ใหม่ด้วยนะครับ เช่น 'เลื่อนงาน 3 เป็นพรุ่งนี้ 18:00'"
+
+    if action == "update_routine":
+        rid = intent.get("routine_id")
+        r_raw = intent.get("routine")
+        updates = r_raw if isinstance(r_raw, dict) else {}
+        if isinstance(rid, int):
+            return _update_routine(db, user_id, rid, updates)
+        return "บอก id กิจวัตรด้วยนะครับ เช่น 'แก้กิจวัตร 1 เป็น 19:00'"
 
     if action == "done":
         tid = intent.get("task_id")

@@ -21,11 +21,12 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยแปลงข้อ�
 
 Schema:
 {
-  "intent": "add"|"list_today"|"list_tomorrow"|"list_week"|"list_all"|"done"|"delete"|"delete_all"|"done_all"|"cancel_recurring"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"help"|"unknown",
+  "intent": "add"|"list_today"|"list_tomorrow"|"list_week"|"list_overdue"|"list_date"|"list_all"|"done"|"delete"|"delete_all"|"done_all"|"snooze"|"cancel_recurring"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"update_routine"|"help"|"unknown",
   "tasks": [{"title": "string", "deadline": "YYYY-MM-DD HH:MM" or null, "recurring": "daily"|"weekly:N"|"monthly:D"|null}],
   "task_id": integer or null,
   "routine": {"title": "string", "time": "HH:MM", "days": "daily|0|0,1,2,3,4", "advance_minutes": 30},
   "routine_id": integer or null,
+  "date": "YYYY-MM-DD" or null,
   "reply": "ข้อความตอบกลับสั้นๆ (optional)"
 }
 
@@ -64,12 +65,16 @@ advance_minutes default=30 (แจ้งก่อน 30 นาที)
 "ทุกจันทร์ประชุมทีม 9 โมง" → {"intent":"add","tasks":[{"title":"ประชุมทีม","deadline":"<จันทร์หน้า> 09:00","recurring":"weekly:0"}]}
 "วันนี้มีอะไรบ้าง"/"งานวันนี้" → {"intent":"list_today"}
 "งานพรุ่งนี้"/"ดูงานวันพรุ่งนี้"/"พรุ่งนี้มีอะไร" → {"intent":"list_tomorrow"}
-"งานอาทิตย์นี้"/"สัปดาห์นี้มีงานอะไร"/"7 วันข้างหน้า" → {"intent":"list_week"}
+"งานอาทิตย์นี้"/"สัปดาห์นี้"/"7 วันข้างหน้า" → {"intent":"list_week"}
+"งานที่ค้าง"/"เลยกำหนดมีอะไร"/"งานที่เลย" → {"intent":"list_overdue"}
+"งานวันที่ 20"/"วัน 25 พ.ค. มีงานอะไร" → {"intent":"list_date","date":"YYYY-MM-20"}
 "งานทั้งหมด"/"มีงานอะไรบ้าง" → {"intent":"list_all"}
 "งาน 3 เสร็จแล้ว" → {"intent":"done","task_id":3}
 "ลบงานที่ 2" → {"intent":"delete","task_id":2}
 "ลบทั้งหมด"/"เคลียร์งานหมด" → {"intent":"delete_all"}
 "ปิดงานทั้งหมด"/"เสร็จหมดแล้ว" → {"intent":"done_all"}
+"เลื่อนงาน 3 เป็นพรุ่งนี้ 20:00" → {"intent":"snooze","task_id":3,"deadline":"<พรุ่งนี้> 20:00"}
+"เลื่อนงาน 5 ออกไป 2 วัน" → {"intent":"snooze","task_id":5,"deadline":"<วันนี้+2วัน> <เวลาเดิม>"}
 "ยกเลิกซ้ำงาน 3" → {"intent":"cancel_recurring","task_id":3}
 
 ตัวอย่าง routines:
@@ -80,6 +85,9 @@ advance_minutes default=30 (แจ้งก่อน 30 นาที)
 "กิจวัตรของฉัน"/"กิจวัตรมีอะไร" → {"intent":"list_routines"}
 "ลบกิจวัตรที่ 2" → {"intent":"delete_routine","routine_id":2}
 "ลบกิจวัตรทั้งหมด" → {"intent":"delete_all_routines"}
+"แก้กิจวัตร 1 เป็น 19:00" → {"intent":"update_routine","routine_id":1,"routine":{"time":"19:00"}}
+"เปลี่ยนกิจวัตร 2 แจ้งก่อน 1 ชั่วโมง" → {"intent":"update_routine","routine_id":2,"routine":{"advance_minutes":60}}
+"แก้กิจวัตร 3 เป็นวันจันทร์-ศุกร์" → {"intent":"update_routine","routine_id":3,"routine":{"days":"0,1,2,3,4"}}
 """
 
 
