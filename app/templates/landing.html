@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}LINE Task Bot — จัดการงานใน LINE{% endblock %}
 {% block content %}
+{% if error %}
+<div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+  ⚠️ เกิดข้อผิดพลาดในการ login: <strong>{{ error }}</strong>
+  <br><span class="text-xs text-red-500">ลองใหม่อีกครั้ง หรือแจ้ง admin</span>
+</div>
+{% endif %}
 <div class="text-center py-12">
   <h1 class="text-4xl font-bold text-green-700 mb-4">📋 LINE Task Bot</h1>
   <p class="text-xl text-gray-600 mb-2">จัดการงานได้เลยใน LINE — ไม่ต้องโหลดแอปใหม่</p>

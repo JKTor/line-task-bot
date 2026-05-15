@@ -111,11 +111,13 @@ def on_startup() -> None:
 # ── public pages ──────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-def landing(request: Request,
+def landing(request: Request, error: str = "",
             session_token: Optional[str] = Cookie(default=None),
             db: Session = Depends(get_db)):
     user = _get_session_user(session_token, db)
-    return templates.TemplateResponse("landing.html", {"request": request, "user": user})
+    if user:
+        return RedirectResponse("/dashboard")
+    return templates.TemplateResponse("landing.html", {"request": request, "user": user, "error": error})
 
 
 @app.get("/health")
@@ -146,10 +148,11 @@ def auth_line():
 def auth_callback(code: str = "", state: str = "",
                    db: Session = Depends(get_db)):
     if not code:
-        return RedirectResponse("/?error=no_code")
+        return RedirectResponse("/?error=ไม่ได้รับ+code+จาก+LINE")
+    print(f"[auth] exchanging code for profile...")
     profile = exchange_code_for_profile(code)
     if not profile:
-        return RedirectResponse("/?error=auth_failed")
+        return RedirectResponse("/?error=LINE+secret+ผิดหรือหมดอายุ+ตรวจสอบ+LINE_LOGIN_SECRET")
 
     user, is_new = get_or_create_user(
         db,
