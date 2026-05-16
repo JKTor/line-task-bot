@@ -1,5 +1,9 @@
 import os
 import pathlib
+import threading
+
+import requests
+from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -109,6 +113,44 @@ def on_startup() -> None:
     print("[startup] DB ready")
     if not CHANNEL_SECRET or not CHANNEL_ACCESS_TOKEN:
         print("[startup] WARNING: LINE credentials missing")
+
+    # ── APScheduler ─────────────────────────────────────────────────────────
+    import pytz
+    tz = pytz.timezone("Asia/Bangkok")
+    _scheduler = BackgroundScheduler(timezone=tz)
+
+    # เช็ค deadline + routine reminders ทุก 5 นาที
+    if CHANNEL_ACCESS_TOKEN:
+        _scheduler.add_job(
+            lambda: (check_and_send_reminders(CHANNEL_ACCESS_TOKEN),
+                     check_routine_reminders(CHANNEL_ACCESS_TOKEN),
+                     check_overdue_followup(CHANNEL_ACCESS_TOKEN)),
+            'interval', minutes=5, id='reminder_check'
+        )
+        # morning digest ทุกวัน 08:00 Bangkok
+        _scheduler.add_job(
+            lambda: morning_digest(CHANNEL_ACCESS_TOKEN),
+            'cron', hour=8, minute=0, id='morning_digest'
+        )
+        # weekly summary ทุกวันจันทร์ 09:00 Bangkok
+        _scheduler.add_job(
+            lambda: weekly_summary(CHANNEL_ACCESS_TOKEN),
+            'cron', day_of_week='mon', hour=9, minute=0, id='weekly_summary'
+        )
+
+    # self-ping ทุก 10 นาที เพื่อไม่ให้ Render free tier หลับ
+    def _keep_alive():
+        try:
+            url = APP_BASE_URL.rstrip('/') + '/health' if APP_BASE_URL else None
+            if url:
+                requests.get(url, timeout=10)
+                print("[keep-alive] ping ok")
+        except Exception as e:
+            print(f"[keep-alive] error: {e}")
+
+    _scheduler.add_job(_keep_alive, 'interval', minutes=10, id='keep_alive')
+    _scheduler.start()
+    print("[startup] APScheduler started — reminders every 5 min, morning digest at 08:00 BKK")
 
 
 # ── public pages ──────────────────────────────────────────────────────────────
