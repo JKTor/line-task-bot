@@ -65,6 +65,43 @@ def _list_message(tasks: List[Task], header: str) -> str:
     return "\n".join([header] + [_format_task_line(t) for t in tasks])
 
 
+def _routine_matches_date(routine: Routine, target_date) -> bool:
+    if routine.days == "daily":
+        return True
+    weekday = str(target_date.weekday())
+    return weekday in [d.strip() for d in routine.days.split(",")]
+
+
+def _get_routines_for_date(db: Session, user_id: str, target_date) -> List[Routine]:
+    routines = (
+        db.query(Routine)
+        .filter_by(user_id=user_id)
+        .order_by(Routine.time_hour, Routine.time_minute)
+        .all()
+    )
+    return [r for r in routines if _routine_matches_date(r, target_date)]
+
+
+def _format_routine_line(routine: Routine) -> str:
+    return f"🔔 #{routine.id} {routine.title}  ⏰ {routine.time_hour:02d}:{routine.time_minute:02d}"
+
+
+def _list_agenda_for_date(db: Session, user_id: str, target_date, header: str) -> str:
+    tasks = _get_tasks_for_date(db, user_id, target_date)
+    routines = _get_routines_for_date(db, user_id, target_date)
+    if not tasks and not routines:
+        return f"{header}\n(ไม่มีงานหรือกิจวัตร 🎉)"
+
+    lines = [header]
+    if tasks:
+        lines.append("\n📋 งาน:")
+        lines.extend(_format_task_line(t) for t in tasks)
+    if routines:
+        lines.append("\n🔔 กิจวัตร:")
+        lines.extend(_format_routine_line(r) for r in routines)
+    return "\n".join(lines)
+
+
 def _ai_deadline_to_utc(s: Optional[str]) -> Optional[datetime]:
     if not s:
         return None
@@ -223,36 +260,12 @@ def _add_task(db: Session, user_id: str, title: str, deadline: Optional[datetime
 
 def _list_today(db: Session, user_id: str) -> str:
     today_local = now_local().date()
-    start_local = now_local().replace(hour=0, minute=0, second=0, microsecond=0)
-    end_local = start_local + timedelta(days=1)
-    start_utc = start_local.astimezone(pytz.utc).replace(tzinfo=None)
-    end_utc = end_local.astimezone(pytz.utc).replace(tzinfo=None)
-    tasks = (
-        db.query(Task)
-        .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
-        .filter(Task.deadline.isnot(None))
-        .filter(Task.deadline >= start_utc, Task.deadline < end_utc)
-        .order_by(Task.deadline.asc())
-        .all()
-    )
-    return _list_message(tasks, f"📅 งานวันนี้ ({today_local.strftime('%d/%m')})")
+    return _list_agenda_for_date(db, user_id, today_local, f"📅 วันนี้ ({today_local.strftime('%d/%m')})")
 
 
 def _list_tomorrow(db: Session, user_id: str) -> str:
     tomorrow_local = (now_local() + timedelta(days=1)).date()
-    start_local = now_local().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    end_local = start_local + timedelta(days=1)
-    start_utc = start_local.astimezone(pytz.utc).replace(tzinfo=None)
-    end_utc = end_local.astimezone(pytz.utc).replace(tzinfo=None)
-    tasks = (
-        db.query(Task)
-        .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
-        .filter(Task.deadline.isnot(None))
-        .filter(Task.deadline >= start_utc, Task.deadline < end_utc)
-        .order_by(Task.deadline.asc())
-        .all()
-    )
-    return _list_message(tasks, f"📅 งานพรุ่งนี้ ({tomorrow_local.strftime('%d/%m')})")
+    return _list_agenda_for_date(db, user_id, tomorrow_local, f"📅 พรุ่งนี้ ({tomorrow_local.strftime('%d/%m')})")
 
 
 def _list_this_week(db: Session, user_id: str) -> str:
@@ -269,7 +282,33 @@ def _list_this_week(db: Session, user_id: str) -> str:
         .order_by(Task.deadline.asc())
         .all()
     )
-    return _list_message(tasks, "📅 งาน 7 วันข้างหน้า")
+    routines = (
+        db.query(Routine)
+        .filter_by(user_id=user_id)
+        .order_by(Routine.time_hour, Routine.time_minute)
+        .all()
+    )
+    week_dates = [(start_local + timedelta(days=i)).date() for i in range(7)]
+    routine_lines = []
+    for target_date in week_dates:
+        matched = [r for r in routines if _routine_matches_date(r, target_date)]
+        if matched:
+            label = _label_for_date(target_date)
+            for r in matched:
+                routine_lines.append(f"🔔 {label} #{r.id} {r.title}  ⏰ {r.time_hour:02d}:{r.time_minute:02d}")
+
+    if not tasks and not routine_lines:
+        return "📅 7 วันข้างหน้า\n(ไม่มีงานหรือกิจวัตร 🎉)"
+    lines = ["📅 7 วันข้างหน้า"]
+    if tasks:
+        lines.append("\n📋 งาน:")
+        lines.extend(_format_task_line(t) for t in tasks)
+    if routine_lines:
+        lines.append("\n🔔 กิจวัตร:")
+        lines.extend(routine_lines[:20])
+        if len(routine_lines) > 20:
+            lines.append(f"...และอีก {len(routine_lines) - 20} รายการ")
+    return "\n".join(lines)
 
 
 def _list_overdue(db: Session, user_id: str) -> str:
@@ -290,20 +329,8 @@ def _list_date(db: Session, user_id: str, date_str: str) -> str:
         target = datetime.strptime(date_str, "%Y-%m-%d").date()
     except (ValueError, TypeError):
         return "ไม่เข้าใจวันที่ที่ระบุ ลองพิมพ์ใหม่นะครับ"
-    start_local = TZ.localize(datetime(target.year, target.month, target.day))
-    end_local = start_local + timedelta(days=1)
-    start_utc = start_local.astimezone(pytz.utc).replace(tzinfo=None)
-    end_utc = end_local.astimezone(pytz.utc).replace(tzinfo=None)
-    tasks = (
-        db.query(Task)
-        .filter(Task.user_id == user_id, Task.done == False)  # noqa: E712
-        .filter(Task.deadline.isnot(None))
-        .filter(Task.deadline >= start_utc, Task.deadline < end_utc)
-        .order_by(Task.deadline.asc())
-        .all()
-    )
     label = _label_for_date(target)
-    return _list_message(tasks, f"📅 งาน{label} ({target.strftime('%d/%m')})")
+    return _list_agenda_for_date(db, user_id, target, f"📅 {label} ({target.strftime('%d/%m')})")
 
 
 def _list_all(db: Session, user_id: str) -> str:
@@ -526,6 +553,16 @@ def _update_routine(db: Session, user_id: str, routine_id: int, updates: dict) -
 _THAI_TIME_WORDS = ("ทุ่ม", "บ่าย", "เย็น", "ตี ", "ตี1", "ตี2", "ตี3", "ตี4", "ตี5",
                     "เช้า", "เที่ยง", "ค่ำ", "ดึก", "สาย", "โมง")
 
+_LIST_QUESTION_WORDS = ("มีอะไร", "ดูงาน", "งาน", "list", "today", "tomorrow", "บ้าง")
+
+
+def _looks_like_schedule_statement(text: str, lower: str) -> bool:
+    has_day = any(w in text for w in ("วันนี้", "พรุ่งนี้", "มะรืน")) or "tomorrow" in lower
+    has_time = any(w in text for w in _THAI_TIME_WORDS) or ":" in text or "." in text
+    has_verb = any(w in text for w in ("มี", "ต้อง", "นัด", "ประชุม", "ส่ง", "ทำ", "ออก", "กิน", "เตือน"))
+    is_list_question = any(w in text for w in _LIST_QUESTION_WORDS) and not has_time
+    return has_day and has_time and has_verb and not is_list_question
+
 
 def _log_unknown(db: Session, user_id: str, text: str, ai_intent: str = "unknown") -> None:
     """Save unrecognized messages for later review and bot improvement."""
@@ -554,6 +591,9 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
 
     if text in ("วันนี้", "today", "งานวันนี้", "ดูงานวันนี้"):
         return _list_today(db, user_id)
+
+    if _looks_like_schedule_statement(text, lower):
+        return None
 
     if ("พรุ่งนี้" in text or "tomorrow" in lower) and ("ลบ" not in text and "เพิ่ม" not in text):
         return _list_tomorrow(db, user_id)

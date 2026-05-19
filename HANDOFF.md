@@ -81,6 +81,33 @@ POST /admin/activate                → activate plan manually
 
 ---
 
+## ✅ ปรับปรุงฟรีเพื่อให้พร้อมขายมากขึ้น (2026-05-20)
+
+### Cron/Render free tier
+- ตั้ง cron-job.org สำเร็จแล้ว 4 งาน:
+  - `LINE Task Bot Health` → `/health` ทุก 5 นาที เพื่อช่วยกัน Render หลับ
+  - `LINE Task Bot Reminder` → `/cron/check?...` ทุก 5 นาที
+  - `LINE Task Bot Morning` → `/cron/morning?...` ทุกวัน 08:00 เวลาไทย
+  - `LINE Task Bot Weekly` → `/cron/weekly?...` ทุกวันจันทร์ 08:00 เวลาไทย
+- ทดสอบแล้ว:
+  - `/health` ได้ `{"status":"ok"}`
+  - `/cron/check` ได้ `{"ok":true,"reminders_sent":0}`
+  - `/cron/morning` ได้ `{"ok":true,"sent":1}`
+  - `/cron/weekly` ได้ `{"ok":true,"sent":1}`
+- ปรับ `app/main.py` ให้ internal APScheduler ปิดเป็นค่าเริ่มต้น เพื่อไม่ให้ส่ง reminder ซ้ำกับ cron-job.org
+- ถ้าต้องการเปิด scheduler ในแอปจริง ให้ตั้ง ENV `ENABLE_INTERNAL_SCHEDULER=true`
+
+### LINE UX / Bot intelligence
+- ปรับ `app/line_handler.py` ให้คำสั่งดูตาราง เช่น `วันนี้`, `พรุ่งนี้`, `อาทิตย์นี้`, `list_date` รวมทั้ง `Task` และ `Routine`
+- ลดเคสที่บอทตอบผิดว่า "(ไม่มีงาน)" ทั้งที่มีกิจวัตร เช่น `ออกกำลังกาย`
+- เพิ่มตัวจับข้อความแบบ schedule statement เช่น `วันพรุ่งนี้ มีออกกำลังกายตอน สี่โมงเย็น` เพื่อไม่ให้ strict matcher รีบตีความเป็นคำถามดูงานพรุ่งนี้อย่างเดียว และปล่อยให้ AI parser ตีความต่อ
+
+### ทดสอบ local
+- `python -m compileall app` ผ่าน
+- จำลอง routine `ออกกำลังกาย` แล้วเรียก `_list_tomorrow()` ได้ผลลัพธ์ที่รวมกิจวัตร
+
+---
+
 ## 🟡 TODO เพิ่มเติม (ทำทีหลังได้)
 
 ### Clarify missing info (PRD §21)
@@ -88,15 +115,23 @@ POST /admin/activate                → activate plan manually
 - ต้องแก้ `ai_parser.py` SYSTEM_PROMPT ให้ return intent = "clarify" เมื่อข้อมูลไม่ครบ
 - webhook ใน `main.py` ต้องเก็บ context ของ conversation ไว้ชั่วคราว (ตอนนี้ stateless)
 
+### ทำให้เหมาะกับการขายมากขึ้นแบบยังไม่เสียเงิน
+- เพิ่ม clarify flow แบบ state ชั่วคราว เช่น user พิมพ์ `เตือนส่งเอกสาร` แล้วบอทถามวัน/เวลา
+- รวม routine ในหน้า `/dashboard/tasks` หรือทำหน้า agenda ใหม่ที่รวม task + routine
+- เพิ่มหน้า admin ดู unknown messages ให้ใช้ง่ายขึ้น และใช้ข้อมูลนั้นปรับ prompt/parser
+- เพิ่ม tests สำหรับ parser/handler เคสภาษาไทยธรรมชาติ
+- ปรับ auth security: ตรวจ LINE OAuth `state`, ตั้ง cookie `secure=True`, และบังคับ `JWT_SECRET` ใน production
+
 ---
 
 ## Cron Jobs (cron-job.org)
 
-| Endpoint | Schedule UTC |
-|----------|-------------|
-| `/cron/check?secret=mybot_cron_a8f3k2j9` | ทุก 5 นาที |
-| `/cron/morning?secret=mybot_cron_a8f3k2j9` | ทุกวัน 01:00 |
-| `/cron/weekly?secret=mybot_cron_a8f3k2j9` | อาทิตย์ 01:00 |
+| Endpoint | Schedule |
+|----------|----------|
+| `/health` | ทุก 5 นาที |
+| `/cron/check?secret=CRON_SECRET` | ทุก 5 นาที |
+| `/cron/morning?secret=CRON_SECRET` | ทุกวัน 08:00 เวลาไทย |
+| `/cron/weekly?secret=CRON_SECRET` | ทุกวันจันทร์ 08:00 เวลาไทย |
 
 ---
 

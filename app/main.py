@@ -1,9 +1,5 @@
 import os
 import pathlib
-import threading
-
-import requests
-from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -66,6 +62,7 @@ CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 CRON_SECRET = os.getenv("CRON_SECRET", "")
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
+ENABLE_INTERNAL_SCHEDULER = os.getenv("ENABLE_INTERNAL_SCHEDULER", "").lower() == "true"
 
 app = FastAPI(title="LINE Task Bot")
 
@@ -114,8 +111,17 @@ def on_startup() -> None:
     if not CHANNEL_SECRET or not CHANNEL_ACCESS_TOKEN:
         print("[startup] WARNING: LINE credentials missing")
 
+    # cron-job.org is the default scheduler for Render free tier. The in-process
+    # scheduler is opt-in only to avoid duplicate reminders when external cron is active.
+    if not ENABLE_INTERNAL_SCHEDULER:
+        print("[startup] Internal scheduler disabled; using external cron jobs")
+        return
+
     # ── APScheduler ─────────────────────────────────────────────────────────
     import pytz
+    import requests
+    from apscheduler.schedulers.background import BackgroundScheduler
+
     tz = pytz.timezone("Asia/Bangkok")
     _scheduler = BackgroundScheduler(timezone=tz)
 
@@ -132,10 +138,10 @@ def on_startup() -> None:
             lambda: morning_digest(CHANNEL_ACCESS_TOKEN),
             'cron', hour=8, minute=0, id='morning_digest'
         )
-        # weekly summary ทุกวันจันทร์ 09:00 Bangkok
+        # weekly summary ทุกวันจันทร์ 08:00 Bangkok
         _scheduler.add_job(
             lambda: weekly_summary(CHANNEL_ACCESS_TOKEN),
-            'cron', day_of_week='mon', hour=9, minute=0, id='weekly_summary'
+            'cron', day_of_week='mon', hour=8, minute=0, id='weekly_summary'
         )
 
     # self-ping ทุก 10 นาที เพื่อไม่ให้ Render free tier หลับ

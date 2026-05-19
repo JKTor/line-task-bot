@@ -14,4 +14,4 @@ aiofiles==23.2.1
 python-multipart==0.0.9
 notion-client==2.2.1
 apscheduler>=3.9.0,<4.0
-
+requests>=2.31.0,<3.0
