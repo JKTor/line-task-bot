@@ -1,5 +1,6 @@
 import os
 import pathlib
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -63,6 +64,10 @@ CRON_SECRET = os.getenv("CRON_SECRET", "")
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
 ENABLE_INTERNAL_SCHEDULER = os.getenv("ENABLE_INTERNAL_SCHEDULER", "").lower() == "true"
+
+# On a real (HTTPS) deploy, cookies must be Secure. Detected from APP_BASE_URL so
+# local http://localhost dev still works without HTTPS.
+_COOKIE_SECURE = APP_BASE_URL.startswith("https://")
 
 app = FastAPI(title="LINE Task Bot")
 
@@ -177,7 +182,9 @@ def health():
 
 
 @app.get("/debug/ai")
-def debug_ai():
+def debug_ai(secret: str = ""):
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+        raise HTTPException(401, "Unauthorized")
     return {
         "groq_set": bool(os.getenv("GROQ_API_KEY")),
         "gemini_set": bool(os.getenv("GEMINI_API_KEY")),
@@ -191,15 +198,24 @@ def debug_ai():
 
 @app.get("/auth/line")
 def auth_line():
-    url = get_line_login_url()
-    return RedirectResponse(url)
+    url, state = get_line_login_url()
+    response = RedirectResponse(url)
+    # Persist state so /auth/callback can verify it (CSRF / login fixation guard).
+    response.set_cookie("oauth_state", state, max_age=600, httponly=True,
+                        samesite="lax", secure=_COOKIE_SECURE)
+    return response
 
 
 @app.get("/auth/callback")
 def auth_callback(code: str = "", state: str = "",
+                   oauth_state: Optional[str] = Cookie(default=None),
                    db: Session = Depends(get_db)):
     if not code:
         return RedirectResponse("/?error=ไม่ได้รับ+code+จาก+LINE")
+    if not state or not oauth_state or not secrets.compare_digest(state, oauth_state):
+        resp = RedirectResponse("/?error=state+ไม่ถูกต้อง+ลองเข้าสู่ระบบใหม่")
+        resp.delete_cookie("oauth_state")
+        return resp
     print(f"[auth] exchanging code for profile...")
     profile = exchange_code_for_profile(code)
     if not profile:
@@ -213,7 +229,9 @@ def auth_callback(code: str = "", state: str = "",
     )
     token = create_session_token(user.line_user_id)
     response = RedirectResponse("/dashboard")
-    response.set_cookie("session_token", token, max_age=86400 * 30, httponly=True, samesite="lax")
+    response.set_cookie("session_token", token, max_age=86400 * 30, httponly=True,
+                        samesite="lax", secure=_COOKIE_SECURE)
+    response.delete_cookie("oauth_state")
     return response
 
 

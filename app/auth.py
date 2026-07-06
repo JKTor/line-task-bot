@@ -19,13 +19,21 @@ JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 30
 
+# Fail loud if the default secret is used on a real deploy — anyone who knows it
+# can forge a session cookie for any user.
+if JWT_SECRET == "change-me-in-production" and not APP_BASE_URL.startswith("http://localhost"):
+    print("[auth] WARNING: JWT_SECRET is unset/default in production — "
+          "session cookies are forgeable. Set JWT_SECRET to a random 32+ char string.")
+
 CALLBACK_URL = f"{APP_BASE_URL}/auth/callback"
 LINE_AUTHORIZE_URL = "https://access.line.me/oauth2/v2.1/authorize"
 LINE_TOKEN_URL = "https://api.line.me/oauth2/v2.1/token"
 LINE_PROFILE_URL = "https://api.line.me/v2/profile"
 
 
-def get_line_login_url() -> str:
+def get_line_login_url() -> tuple[str, str]:
+    """Return (authorize_url, state). Caller must persist `state` (e.g. a cookie)
+    and verify it on the callback to prevent CSRF/login fixation."""
     state = secrets.token_urlsafe(16)
     params = (
         f"response_type=code"
@@ -34,7 +42,7 @@ def get_line_login_url() -> str:
         f"&state={state}"
         f"&scope=profile%20openid"
     )
-    return f"{LINE_AUTHORIZE_URL}?{params}"
+    return f"{LINE_AUTHORIZE_URL}?{params}", state
 
 
 def exchange_code_for_profile(code: str) -> Optional[dict]:
