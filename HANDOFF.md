@@ -145,10 +145,17 @@ POST /admin/activate                → activate plan manually
 - **✅ tests parser ภาษาไทย:** `scripts/test_parser_th.py` (pure, ไม่ต้อง AI/DB) — parse_task + guard ต่างๆ 25 เคส ผ่านหมด
 - ⚠️ รัน test บน Windows ต้องตั้ง `$env:PYTHONIOENCODING="utf-8"` ก่อน (console cp1252 พัง emoji)
 
+## ✅ เสร็จเพิ่ม (2026-07-06 รอบ web actions)
+
+- **หน้า `/dashboard/tasks` กดจัดการได้จริงแล้ว** (เดิม read-only): ปุ่ม ✅ เสร็จ / 🗑️ ลบงาน + 🗑️ ลบกิจวัตร
+  - POST endpoints ใหม่: `/dashboard/tasks/{id}/done`, `/dashboard/tasks/{id}/delete`, `/dashboard/routines/{id}/delete`
+  - reuse `line_handler._mark_done/_delete_task/_delete_routine` (filter user_id → ownership ปลอดภัย), redirect กลับ filter เดิม
+  - `scripts/test_web_actions.py` ยืนยัน happy path + ownership (A แตะงาน B ไม่ได้) + redirect เมื่อไม่ล็อกอิน
+
 ## 🟡 TODO ที่ยังเหลือ
 
-- routine ในหน้า tasks ยังเป็น read-only + filter overdue ไม่โชว์ routine (ตั้งใจ)
-- ปรับ prompt/parser จากข้อมูล unknown messages ที่เก็บได้
+- แก้ไข routine (เวลา/วัน) บนเว็บ — ตอนนี้ลบได้อย่างเดียว, แก้ต้องพิมพ์ในไลน์
+- ปรับ prompt/parser จากข้อมูล unknown messages ที่เก็บได้ (ต้องรอ data จริงจาก user)
 
 ---
 

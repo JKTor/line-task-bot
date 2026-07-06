@@ -37,7 +37,19 @@
             <p class="text-xs text-gray-500 mt-1 italic">📝 {{ t.note }}</p>
           {% endif %}
         </div>
-        <span class="text-xs text-gray-300 whitespace-nowrap">LINE</span>
+        <div class="flex gap-1 shrink-0">
+          <form method="post" action="/dashboard/tasks/{{ t.id }}/done">
+            <input type="hidden" name="filter" value="{{ filter }}">
+            <button type="submit" title="ทำเครื่องหมายเสร็จ"
+                    class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-lg font-semibold hover:bg-green-200">✅</button>
+          </form>
+          <form method="post" action="/dashboard/tasks/{{ t.id }}/delete"
+                onsubmit="return confirm('ลบงาน #{{ t.id }} {{ t.title }}?');">
+            <input type="hidden" name="filter" value="{{ filter }}">
+            <button type="submit" title="ลบงาน"
+                    class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-lg font-semibold hover:bg-red-100 hover:text-red-600">🗑️</button>
+          </form>
+        </div>
       </div>
     {% endfor %}
   </div>
@@ -53,7 +65,12 @@
           <p class="font-medium">#{{ r.id }} {{ r.title }}</p>
           <p class="text-xs text-gray-400 mt-1">⏰ {{ r.time_local }} · {{ r.days_label }}</p>
         </div>
-        <span class="text-xs text-gray-300 whitespace-nowrap">กิจวัตร</span>
+        <form method="post" action="/dashboard/routines/{{ r.id }}/delete" class="shrink-0"
+              onsubmit="return confirm('ลบกิจวัตร #{{ r.id }} {{ r.title }}?');">
+          <input type="hidden" name="filter" value="{{ filter }}">
+          <button type="submit" title="ลบกิจวัตร"
+                  class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-lg font-semibold hover:bg-red-100 hover:text-red-600">🗑️</button>
+        </form>
       </div>
     {% endfor %}
   </div>
@@ -68,6 +85,6 @@
 {% endif %}
 
 <p class="text-xs text-gray-400 text-center mt-8">
-  พิมงานใน LINE → ปรากฏที่นี่ทันที (refresh หน้าเพื่ออัปเดต)
+  ✅ กดเสร็จ · 🗑️ ลบ ได้เลยบนเว็บ — หรือพิมงานใน LINE ก็ปรากฏที่นี่
 </p>
 {% endblock %}

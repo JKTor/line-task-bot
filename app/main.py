@@ -347,6 +347,47 @@ def dashboard_tasks(request: Request,
     })
 
 
+def _tasks_redirect(filter: str) -> RedirectResponse:
+    safe = filter if filter in ("today", "tomorrow", "overdue", "all") else "all"
+    return RedirectResponse(f"/dashboard/tasks?filter={safe}", status_code=302)
+
+
+@app.post("/dashboard/tasks/{task_id}/done")
+def web_task_done(task_id: int, filter: str = Form("all"),
+                  session_token: Optional[str] = Cookie(default=None),
+                  db: Session = Depends(get_db)):
+    from app import line_handler
+    user = _get_session_user(session_token, db)
+    if not user:
+        return RedirectResponse("/auth/line")
+    line_handler._mark_done(db, user.line_user_id, task_id)  # ownership-checked inside
+    return _tasks_redirect(filter)
+
+
+@app.post("/dashboard/tasks/{task_id}/delete")
+def web_task_delete(task_id: int, filter: str = Form("all"),
+                    session_token: Optional[str] = Cookie(default=None),
+                    db: Session = Depends(get_db)):
+    from app import line_handler
+    user = _get_session_user(session_token, db)
+    if not user:
+        return RedirectResponse("/auth/line")
+    line_handler._delete_task(db, user.line_user_id, task_id)
+    return _tasks_redirect(filter)
+
+
+@app.post("/dashboard/routines/{routine_id}/delete")
+def web_routine_delete(routine_id: int, filter: str = Form("all"),
+                       session_token: Optional[str] = Cookie(default=None),
+                       db: Session = Depends(get_db)):
+    from app import line_handler
+    user = _get_session_user(session_token, db)
+    if not user:
+        return RedirectResponse("/auth/line")
+    line_handler._delete_routine(db, user.line_user_id, routine_id)
+    return _tasks_redirect(filter)
+
+
 # ── admin ─────────────────────────────────────────────────────────────────────
 
 @app.get("/admin", response_class=HTMLResponse)
