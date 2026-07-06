@@ -21,7 +21,7 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยแปลงข้อ�
 
 Schema:
 {
-  "intent": "add"|"list_today"|"list_tomorrow"|"list_week"|"list_overdue"|"list_urgent"|"list_date"|"list_all"|"search"|"done"|"delete"|"delete_all"|"done_all"|"snooze"|"cancel_recurring"|"add_note"|"set_priority"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"update_routine"|"help"|"unknown",
+  "intent": "add"|"clarify"|"list_today"|"list_tomorrow"|"list_week"|"list_overdue"|"list_urgent"|"list_date"|"list_all"|"search"|"done"|"delete"|"delete_all"|"done_all"|"snooze"|"cancel_recurring"|"add_note"|"set_priority"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"update_routine"|"help"|"unknown",
   "tasks": [{"title": "string", "deadline": "YYYY-MM-DD HH:MM" or null, "recurring": "daily"|"weekly:N"|"monthly:D"|null, "priority": "urgent"|"high"|"normal"|"low"|null, "note": "string"|null}],
   "task_id": integer or null,
   "priority": "urgent"|"high"|"normal"|"low"|null,
@@ -37,6 +37,16 @@ Schema:
 - ถ้าผู้ใช้สั่งเพิ่มงานหลายอย่าง ให้ list หลายตัวใน tasks
 - ถ้าไม่ระบุเวลา ให้ deadline = null  |  ถ้าระบุแค่วัน ใช้ 23:59
 - ถ้าจับใจความไม่ได้ → intent="unknown"
+
+⚠️ กฎ clarify (ถามกลับเมื่อข้อมูลไม่ครบ) — สำคัญ:
+- intent="clarify" ใช้เมื่อผู้ใช้ต้องการให้ "เตือน" หรือตั้งงานที่ควรมีกำหนดส่ง แต่ "ไม่ได้บอกวันหรือเวลาเลย"
+  → คืน {"intent":"clarify","tasks":[{"title":"<ชื่องาน>"}],"reply":"📅 อยากให้เตือนวันไหน เวลาไหนดีครับ?"}
+- ⚠️ ห้ามใช้ clarify ถ้าผู้ใช้แค่ "จดไว้"/"โน้ต"/"ไม่รีบ"/"ทำทีหลัง" — พวกนี้ deadline=null ได้ ใช้ intent="add" ตามปกติ
+- ⚠️ ถ้ามีวันหรือเวลาอยู่แล้ว (แม้บอกแค่วัน) → intent="add" ไม่ต้อง clarify
+ตัวอย่าง clarify:
+"เตือนส่งเอกสาร" → {"intent":"clarify","tasks":[{"title":"ส่งเอกสาร"}],"reply":"📅 อยากให้เตือน 'ส่งเอกสาร' วันไหน เวลาไหนดีครับ?"}
+"อย่าลืมจ่ายบิล" → {"intent":"clarify","tasks":[{"title":"จ่ายบิล"}],"reply":"📅 อยากให้เตือน 'จ่ายบิล' วันไหน เวลาไหนดีครับ?"}
+"จดไว้ ซื้อยา ไม่รีบ" → {"intent":"add","tasks":[{"title":"ซื้อยา","deadline":null,"priority":"low"}]}
 - intent="done"/"delete"/"cancel_recurring" ต้องมี task_id
 - intent="delete_routine" ต้องมี routine_id
 - priority default = "normal" ถ้าไม่ระบุ

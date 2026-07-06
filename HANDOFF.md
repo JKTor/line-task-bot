@@ -128,15 +128,17 @@ POST /admin/activate                → activate plan manually
 
 ---
 
+## ✅ Clarify flow เสร็จแล้ว (PRD §21, 2026-07-06)
+
+"เตือนส่งเอกสาร" (ไม่บอกวัน) → บอทถาม "📅 อยากให้เตือนวันไหน?" → user ตอบ "พรุ่งนี้ 17:00" → บอทสร้างงานให้
+- `ai_parser.py`: เพิ่ม intent `clarify` (คืนเฉพาะคำสั่งเตือน/ตั้งงานที่ขาดวัน-เวลา ไม่ over-trigger กับ "จดไว้/ไม่รีบ")
+- state เก็บในตารางใหม่ `PendingClarify` (1 row/user, TTL 10 นาที) — สร้างอัตโนมัติโดย `create_all` ตอน deploy
+- `line_handler.handle_command`: เช็ค pending ก่อน → ข้อความถัดไปถือเป็นคำตอบ merge กับ title เดิมแล้วส่งเข้า pipeline เดิม (`allow_clarify=False` กัน loop); พิมพ์ "ยกเลิก" = ล้าง pending
+- ทดสอบครบ 6 เคสด้วย `python scripts/test_clarify.py` (mock AI, ผ่านหมด)
+
 ## 🟡 TODO เพิ่มเติม (ทำทีหลังได้)
 
-### Clarify missing info (PRD §21)
-"เตือนส่งเอกสาร" → บอทถาม "ให้เตือนวันไหน?"
-- ต้องแก้ `ai_parser.py` SYSTEM_PROMPT ให้ return intent = "clarify" เมื่อข้อมูลไม่ครบ
-- webhook ใน `main.py` ต้องเก็บ context ของ conversation ไว้ชั่วคราว (ตอนนี้ stateless)
-
 ### ทำให้เหมาะกับการขายมากขึ้นแบบยังไม่เสียเงิน
-- เพิ่ม clarify flow แบบ state ชั่วคราว เช่น user พิมพ์ `เตือนส่งเอกสาร` แล้วบอทถามวัน/เวลา
 - รวม routine ในหน้า `/dashboard/tasks` หรือทำหน้า agenda ใหม่ที่รวม task + routine
 - เพิ่มหน้า admin ดู unknown messages ให้ใช้ง่ายขึ้น และใช้ข้อมูลนั้นปรับ prompt/parser
 - เพิ่ม tests สำหรับ parser/handler เคสภาษาไทยธรรมชาติ

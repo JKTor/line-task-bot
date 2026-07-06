@@ -11,8 +11,12 @@ import pytz
 from sqlalchemy.orm import Session
 
 from app import ai_parser
-from app.models import Routine, Task, UnknownMessage, User
+from app.models import PendingClarify, Routine, Task, UnknownMessage, User
 from app.parser import TZ, format_deadline, now_local, parse_task
+
+# How long a "waiting for the user to supply a date" state stays valid.
+_PENDING_TTL_MIN = 10
+_CANCEL_WORDS = ("ยกเลิก", "ไม่ต้อง", "ไม่เอา", "เลิก", "cancel")
 
 HELP_TEXT = (
     "📝 คำสั่งที่ใช้ได้:\n"
@@ -564,6 +568,35 @@ def _looks_like_schedule_statement(text: str, lower: str) -> bool:
     return has_day and has_time and has_verb and not is_list_question
 
 
+# ===== Clarify (pending) state =====
+
+def _set_pending(db: Session, user_id: str, title: str) -> None:
+    """Remember a task whose date/time we just asked the user for (upsert)."""
+    row = db.query(PendingClarify).filter_by(user_id=user_id).first()
+    if row:
+        row.title = title[:500]
+        row.created_at = datetime.utcnow()
+    else:
+        db.add(PendingClarify(user_id=user_id, title=title[:500]))
+    db.commit()
+
+
+def _get_pending(db: Session, user_id: str) -> Optional[PendingClarify]:
+    """Return an unexpired pending clarify, or None. Expired rows are cleaned up."""
+    row = db.query(PendingClarify).filter_by(user_id=user_id).first()
+    if not row:
+        return None
+    if datetime.utcnow() - row.created_at > timedelta(minutes=_PENDING_TTL_MIN):
+        _clear_pending(db, user_id)
+        return None
+    return row
+
+
+def _clear_pending(db: Session, user_id: str) -> None:
+    db.query(PendingClarify).filter_by(user_id=user_id).delete()
+    db.commit()
+
+
 def _log_unknown(db: Session, user_id: str, text: str, ai_intent: str = "unknown") -> None:
     """Save unrecognized messages for later review and bot improvement."""
     try:
@@ -670,9 +703,30 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
 
 # ===== AI dispatcher =====
 
-def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
+def _dispatch_ai(db: Session, user_id: str, intent: dict, allow_clarify: bool = True):
     action = intent.get("intent", "unknown")
     extra = intent.get("reply", "")
+
+    if action == "clarify":
+        tasks_raw = intent.get("tasks")
+        tasks_in = tasks_raw if isinstance(tasks_raw, list) else []
+        title = ""
+        for t in tasks_in:
+            if isinstance(t, dict) and (t.get("title") or "").strip():
+                title = t["title"].strip()
+                break
+        if not title:
+            return extra or "บอกชื่องานที่จะเตือนด้วยนะครับ"
+        if not allow_clarify:
+            # This is already the user's answer and it's still missing a time —
+            # don't ask again (avoid loops). Just add the task without a deadline.
+            saved = _add_task(db, user_id, title, None)
+            return _format_add_beautiful(db, user_id, saved)
+        _set_pending(db, user_id, title)
+        return (
+            (extra.strip() if extra else f"📅 อยากให้เตือน \"{title}\" วันไหน เวลาไหนดีครับ?")
+            + "\n(ตอบเช่น 'พรุ่งนี้ 17:00' หรือพิมพ์ 'ยกเลิก')"
+        )
 
     if action == "add":
         tasks_raw = intent.get("tasks")
@@ -830,11 +884,7 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict) -> str:
 
 # ===== Public entry point =====
 
-def handle_command(db: Session, user_id: str, text: str):
-    text = text.strip()
-    if not text:
-        return HELP_TEXT
-
+def _run_pipeline(db: Session, user_id: str, text: str, allow_clarify: bool = True):
     strict = _try_strict(db, user_id, text)
     if strict is not None:
         return strict
@@ -842,8 +892,28 @@ def handle_command(db: Session, user_id: str, text: str):
     if ai_parser.is_enabled():
         intent = ai_parser.parse(text)
         intent["_original_text"] = text  # pass through for unknown logging
-        return _dispatch_ai(db, user_id, intent)
+        return _dispatch_ai(db, user_id, intent, allow_clarify=allow_clarify)
 
     # Strict parser only, no AI — log as unknown
     _log_unknown(db, user_id, text, "no_ai")
     return HELP_TEXT
+
+
+def handle_command(db: Session, user_id: str, text: str):
+    text = text.strip()
+    if not text:
+        return HELP_TEXT
+
+    # If we previously asked the user for a missing date/time, treat this message
+    # as the answer: merge it with the remembered task title and run it through
+    # the normal pipeline (which parses the date). allow_clarify=False so we never
+    # loop back into another question.
+    pending = _get_pending(db, user_id)
+    if pending is not None:
+        _clear_pending(db, user_id)
+        if any(w in text.lower() for w in _CANCEL_WORDS):
+            return f"โอเค ยกเลิก \"{pending.title}\" แล้วนะครับ 👍"
+        combined = f"เพิ่ม {pending.title} {text}".strip()
+        return _run_pipeline(db, user_id, combined, allow_clarify=False)
+
+    return _run_pipeline(db, user_id, text, allow_clarify=True)

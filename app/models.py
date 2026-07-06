@@ -52,6 +52,21 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class PendingClarify(Base):
+    """A task the bot is waiting for the user to finish (e.g. supply a date).
+
+    One row per user (line_user_id). Created when the AI returns intent="clarify";
+    consumed (deleted) when the user's next message answers the question, or when
+    it expires. New table → created automatically by Base.metadata.create_all().
+    """
+    __tablename__ = "pending_clarify"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(64), unique=True, index=True, nullable=False)
+    title = Column(String(500), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class UnknownMessage(Base):
     __tablename__ = "unknown_messages"
 
