@@ -136,12 +136,19 @@ POST /admin/activate                → activate plan manually
 - `line_handler.handle_command`: เช็ค pending ก่อน → ข้อความถัดไปถือเป็นคำตอบ merge กับ title เดิมแล้วส่งเข้า pipeline เดิม (`allow_clarify=False` กัน loop); พิมพ์ "ยกเลิก" = ล้าง pending
 - ทดสอบครบ 6 เคสด้วย `python scripts/test_clarify.py` (mock AI, ผ่านหมด)
 
-## 🟡 TODO เพิ่มเติม (ทำทีหลังได้)
+## ✅ เสร็จเพิ่ม (2026-07-06 รอบ review+TODO)
 
-### ทำให้เหมาะกับการขายมากขึ้นแบบยังไม่เสียเงิน
-- รวม routine ในหน้า `/dashboard/tasks` หรือทำหน้า agenda ใหม่ที่รวม task + routine
-- เพิ่มหน้า admin ดู unknown messages ให้ใช้ง่ายขึ้น และใช้ข้อมูลนั้นปรับ prompt/parser
-- เพิ่ม tests สำหรับ parser/handler เคสภาษาไทยธรรมชาติ
+- **แก้บั๊ก clarify cancel:** `_CANCEL_WORDS` เดิมเช็คแบบ substring → คำว่า "เลิก" ใน "หลังเลิกงาน 6 โมง" ทำให้บอทยกเลิกงานผิด. เปลี่ยนเป็น `_is_cancel()` ที่ match ทั้งข้อความ/startswith "ยกเลิก" เท่านั้น
+- **กัน pending hijack:** เพิ่ม `_looks_like_fresh_command()` — ถ้าระหว่างรอตอบวัน ผู้ใช้พิมพ์คำสั่งชัดเจน (งานวันนี้/ทั้งหมด/กิจวัตร/ช่วยเหลือ) จะรันคำสั่งนั้นแทนที่จะเอาไป merge เป็น title
+- **✅ รวม routine ในหน้า `/dashboard/tasks`:** route query routine + filter ตาม weekday (today/tomorrow), แยก section "📋 งาน" / "🔔 กิจวัตร" ใน `tasks.html`
+- **✅ หน้า admin unknown messages:** แปลง `/admin/unknown` จาก JSON → HTML (`unknown.html`) ใช้ `ADMIN_SECRET` (เดิมเช็ค CRON_SECRET ทำให้ลิงก์ใน admin.html พัง), มี tab ยังไม่จัดการ/จัดการแล้ว + ปุ่ม resolve
+- **✅ tests parser ภาษาไทย:** `scripts/test_parser_th.py` (pure, ไม่ต้อง AI/DB) — parse_task + guard ต่างๆ 25 เคส ผ่านหมด
+- ⚠️ รัน test บน Windows ต้องตั้ง `$env:PYTHONIOENCODING="utf-8"` ก่อน (console cp1252 พัง emoji)
+
+## 🟡 TODO ที่ยังเหลือ
+
+- routine ในหน้า tasks ยังเป็น read-only + filter overdue ไม่โชว์ routine (ตั้งใจ)
+- ปรับ prompt/parser จากข้อมูล unknown messages ที่เก็บได้
 
 ---
 

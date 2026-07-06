@@ -18,6 +18,7 @@
 </div>
 
 {% if tasks %}
+  <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">📋 งาน</p>
   <div class="space-y-3">
     {% for t in tasks %}
       <div class="bg-white rounded-xl px-5 py-4 shadow-sm border flex items-start gap-3">
@@ -40,7 +41,25 @@
       </div>
     {% endfor %}
   </div>
-{% else %}
+{% endif %}
+
+{% if routines %}
+  <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 {% if tasks %}mt-8{% endif %}">🔔 กิจวัตร</p>
+  <div class="space-y-3">
+    {% for r in routines %}
+      <div class="bg-white rounded-xl px-5 py-4 shadow-sm border flex items-start gap-3">
+        <span class="text-xl mt-0.5">🔔</span>
+        <div class="flex-1 min-w-0">
+          <p class="font-medium">#{{ r.id }} {{ r.title }}</p>
+          <p class="text-xs text-gray-400 mt-1">⏰ {{ r.time_local }} · {{ r.days_label }}</p>
+        </div>
+        <span class="text-xs text-gray-300 whitespace-nowrap">กิจวัตร</span>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% if not tasks and not routines %}
   <div class="text-center py-16 text-gray-400">
     <p class="text-5xl mb-4">🎉</p>
     <p>ไม่มีงาน — ว่างได้เลย!</p>

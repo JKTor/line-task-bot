@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Unknown messages — Admin{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-bold">❓ ข้อความที่บอทไม่เข้าใจ</h1>
+  <a href="/admin?secret={{ secret }}" class="text-sm text-blue-500 hover:underline">← กลับ Admin</a>
+</div>
+
+<div class="flex gap-2 mb-6">
+  <a href="/admin/unknown?secret={{ secret }}"
+     class="px-4 py-1 rounded-full text-sm font-medium
+            {% if not resolved %}bg-green-500 text-white{% else %}bg-white text-gray-600 border{% endif %}">
+    ยังไม่จัดการ ({{ pending_count }})
+  </a>
+  <a href="/admin/unknown?secret={{ secret }}&resolved=true"
+     class="px-4 py-1 rounded-full text-sm font-medium
+            {% if resolved %}bg-green-500 text-white{% else %}bg-white text-gray-600 border{% endif %}">
+    จัดการแล้ว
+  </a>
+</div>
+
+{% if msgs %}
+  <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ข้อความ</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">AI intent</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">เวลา</th>
+          {% if not resolved %}<th class="px-4 py-3"></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for m in msgs %}
+          <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 font-medium">{{ m.text }}</td>
+            <td class="px-4 py-3">
+              <span class="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ m.ai_intent or 'unknown' }}</span>
+            </td>
+            <td class="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{{ m.created_local }}</td>
+            {% if not resolved %}
+              <td class="px-4 py-3 text-right">
+                <form method="post" action="/admin/unknown/{{ m.id }}/resolve">
+                  <input type="hidden" name="secret" value="{{ secret }}">
+                  <button type="submit"
+                          class="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-lg font-semibold hover:bg-green-200">
+                    ✓ จัดการแล้ว
+                  </button>
+                </form>
+              </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-xs text-gray-400 mt-4">
+    💡 ใช้ข้อความเหล่านี้ปรับ prompt/parser เพื่อให้บอทเข้าใจมากขึ้น
+  </p>
+{% else %}
+  <div class="text-center py-16 text-gray-400">
+    <p class="text-5xl mb-4">🎉</p>
+    <p>{% if resolved %}ยังไม่มีรายการที่จัดการแล้ว{% else %}ไม่มีข้อความค้าง — บอทเข้าใจทุกอย่าง!{% endif %}</p>
+  </div>
+{% endif %}
+{% endblock %}

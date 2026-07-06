@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db, init_db
 from app.line_handler import handle_command
-from app.models import Task, UnknownMessage, User
+from app.models import Routine, Task, UnknownMessage, User
 from app.scheduler import (
     check_and_send_reminders,
     check_overdue_followup,
@@ -314,8 +314,36 @@ def dashboard_tasks(request: Request,
             dl_local = pytz.utc.localize(t.deadline).astimezone(TZ).strftime("%d/%m %H:%M")
         tasks.append({**t.__dict__, "deadline_local": dl_local})
 
+    # Routines are habits/reminders (no deadline), so they only make sense on the
+    # date-scoped views. "overdue" is a task-only concept → skip routines there.
+    routines = []
+    if filter != "overdue":
+        routines_raw = (
+            db.query(Routine)
+            .filter_by(user_id=user.line_user_id)
+            .order_by(Routine.time_hour, Routine.time_minute)
+            .all()
+        )
+        target_wd = None
+        if filter == "today":
+            target_wd = now.weekday()
+        elif filter == "tomorrow":
+            target_wd = (now + timedelta(days=1)).weekday()
+
+        for r in routines_raw:
+            if target_wd is not None and r.days != "daily":
+                if str(target_wd) not in [d.strip() for d in r.days.split(",")]:
+                    continue
+            routines.append({
+                "id": r.id,
+                "title": r.title,
+                "time_local": f"{r.time_hour:02d}:{r.time_minute:02d}",
+                "days_label": "ทุกวัน" if r.days == "daily" else "บางวัน",
+            })
+
     return templates.TemplateResponse("tasks.html", {
-        "request": request, "user": user, "tasks": tasks, "filter": filter,
+        "request": request, "user": user,
+        "tasks": tasks, "routines": routines, "filter": filter,
     })
 
 
@@ -352,31 +380,47 @@ def admin_activate(secret: str = Form(""), line_user_id: str = Form(""),
     return RedirectResponse(f"/admin?secret={secret}&flash=activated", status_code=302)
 
 
-@app.get("/admin/unknown")
-def admin_unknown(secret: str = "", resolved: bool = False, db: Session = Depends(get_db)):
-    if not CRON_SECRET or secret != CRON_SECRET:
+@app.get("/admin/unknown", response_class=HTMLResponse)
+def admin_unknown(request: Request, secret: str = "", resolved: bool = False,
+                  db: Session = Depends(get_db)):
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
         raise HTTPException(401, "Unauthorized")
-    msgs = (
+    from app.parser import TZ
+    import pytz
+    msgs_raw = (
         db.query(UnknownMessage)
         .filter(UnknownMessage.resolved == resolved)
         .order_by(UnknownMessage.created_at.desc())
-        .limit(50)
+        .limit(100)
         .all()
     )
-    return [{"id": m.id, "text": m.text, "ai_intent": m.ai_intent,
-             "created_at": m.created_at.isoformat() if m.created_at else None} for m in msgs]
+    msgs = []
+    for m in msgs_raw:
+        created = "—"
+        if m.created_at:
+            created = pytz.utc.localize(m.created_at).astimezone(TZ).strftime("%d/%m %H:%M")
+        msgs.append({"id": m.id, "text": m.text, "ai_intent": m.ai_intent, "created_local": created})
+    pending_count = db.query(UnknownMessage).filter(UnknownMessage.resolved == False).count()  # noqa: E712
+    return templates.TemplateResponse("unknown.html", {
+        "request": request, "secret": secret, "msgs": msgs,
+        "resolved": resolved, "pending_count": pending_count,
+    })
 
 
 @app.post("/admin/unknown/{msg_id}/resolve")
-def admin_resolve(msg_id: int, secret: str = "", db: Session = Depends(get_db)):
-    if not CRON_SECRET or secret != CRON_SECRET:
+def admin_resolve(msg_id: int, secret: str = Form(""), resolved: str = Form("false"),
+                  db: Session = Depends(get_db)):
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
         raise HTTPException(401, "Unauthorized")
     msg = db.query(UnknownMessage).filter_by(id=msg_id).first()
     if not msg:
         raise HTTPException(404, "Not found")
     msg.resolved = True
     db.commit()
-    return {"ok": True}
+    back = f"/admin/unknown?secret={secret}"
+    if resolved == "true":
+        back += "&resolved=true"
+    return RedirectResponse(back, status_code=302)
 
 
 @app.delete("/admin/unknown/resolved")

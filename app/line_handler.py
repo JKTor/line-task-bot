@@ -16,7 +16,14 @@ from app.parser import TZ, format_deadline, now_local, parse_task
 
 # How long a "waiting for the user to supply a date" state stays valid.
 _PENDING_TTL_MIN = 10
-_CANCEL_WORDS = ("ยกเลิก", "ไม่ต้อง", "ไม่เอา", "เลิก", "cancel")
+# Match cancel only against the *whole* short reply — never as a substring.
+# ("เลิก" as a substring would wrongly cancel answers like "หลังเลิกงาน 6 โมง".)
+_CANCEL_WORDS = {"ยกเลิก", "ไม่ต้อง", "ไม่ต้องแล้ว", "ไม่เอา", "ไม่เอาแล้ว", "เลิก", "cancel"}
+
+
+def _is_cancel(text: str) -> bool:
+    t = text.strip().lower()
+    return t in _CANCEL_WORDS or t.startswith("ยกเลิก")
 
 HELP_TEXT = (
     "📝 คำสั่งที่ใช้ได้:\n"
@@ -597,6 +604,21 @@ def _clear_pending(db: Session, user_id: str) -> None:
     db.commit()
 
 
+# Unmistakable standalone commands that should override a pending clarify
+# (the user asked something else instead of supplying the missing date).
+_FRESH_COMMANDS = {
+    "วันนี้", "today", "งานวันนี้", "ดูงานวันนี้",
+    "ทั้งหมด", "all", "list", "งานทั้งหมด", "ดูงานทั้งหมด",
+    "กิจวัตร", "กิจวัตรของฉัน", "routine", "routines",
+    "ช่วยเหลือ", "help", "?",
+}
+
+
+def _looks_like_fresh_command(text: str) -> bool:
+    """Whole-message match only — never treat a date answer as a command."""
+    return text.strip().lower() in _FRESH_COMMANDS
+
+
 def _log_unknown(db: Session, user_id: str, text: str, ai_intent: str = "unknown") -> None:
     """Save unrecognized messages for later review and bot improvement."""
     try:
@@ -911,8 +933,12 @@ def handle_command(db: Session, user_id: str, text: str):
     pending = _get_pending(db, user_id)
     if pending is not None:
         _clear_pending(db, user_id)
-        if any(w in text.lower() for w in _CANCEL_WORDS):
+        if _is_cancel(text):
             return f"โอเค ยกเลิก \"{pending.title}\" แล้วนะครับ 👍"
+        # If the reply is itself an unmistakable command (list/help/etc.), the user
+        # has moved on — run it fresh instead of treating it as the missing date.
+        if _looks_like_fresh_command(text):
+            return _run_pipeline(db, user_id, text, allow_clarify=True)
         combined = f"เพิ่ม {pending.title} {text}".strip()
         return _run_pipeline(db, user_id, combined, allow_clarify=False)
 
