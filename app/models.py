@@ -67,6 +67,20 @@ class PendingClarify(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class AppState(Base):
+    """Tiny key/value store for system-wide flags (not per-user).
+
+    Used to dedupe the weekly summary: we piggyback it on the reliable 5-min
+    /cron/check instead of a fragile weekly cron, and record which ISO week was
+    already sent here. New table → created automatically by create_all().
+    """
+    __tablename__ = "app_state"
+
+    key = Column(String(50), primary_key=True)
+    value = Column(String(100), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class UnknownMessage(Base):
     __tablename__ = "unknown_messages"
 

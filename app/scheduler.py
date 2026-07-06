@@ -12,8 +12,10 @@ from linebot.v3.messaging import (
 )
 
 from app.database import SessionLocal
-from app.models import Routine, Task, User
+from app.models import AppState, Routine, Task, User
 from app.parser import format_deadline, now_local
+
+_WEEKLY_STATE_KEY = "weekly_last_week"
 
 THAI_DAYS = ["จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์","อาทิตย์"]
 THAI_MONTHS = ["","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.",
@@ -278,8 +280,42 @@ def morning_digest(access_token: str) -> int:
         db.close()
 
 
+def maybe_send_weekly(access_token: str) -> int:
+    """Send the weekly summary once per week, on Monday at/after 08:00 Bangkok.
+
+    Meant to be called from the reliable every-5-min /cron/check so we don't depend
+    on a separate weekly cron job (which can silently get disabled). A row in
+    app_state records the ISO week already sent, so repeated 5-min calls on Monday
+    morning fire the summary exactly once. Returns users notified (0 if not due).
+    """
+    now = now_local()
+    if now.weekday() != 0 or now.hour < 8:  # 0 = Monday
+        return 0
+    week_key = now.strftime("%G-W%V")  # ISO year + week, e.g. 2026-W28
+
+    db = SessionLocal()
+    try:
+        state = db.get(AppState, _WEEKLY_STATE_KEY)
+        if state and state.value == week_key:
+            return 0  # already sent this week
+        # Claim the week BEFORE sending so an overlapping 5-min call can't double-send.
+        if state:
+            state.value = week_key
+        else:
+            db.add(AppState(key=_WEEKLY_STATE_KEY, value=week_key))
+        db.commit()
+    finally:
+        db.close()
+
+    print(f"[weekly] due for {week_key} — sending summary")
+    return weekly_summary(access_token)
+
+
 def weekly_summary(access_token: str) -> int:
-    """Send weekly summary on Sundays. Returns number of users notified."""
+    """Send weekly summary to every user. Returns number of users notified.
+
+    Called directly by /cron/weekly (manual/back-compat) and by maybe_send_weekly()
+    after the once-per-week guard passes."""
     db = SessionLocal()
     sent = 0
     try:

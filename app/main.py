@@ -29,6 +29,7 @@ from app.scheduler import (
     check_and_send_reminders,
     check_overdue_followup,
     check_routine_reminders,
+    maybe_send_weekly,
     morning_digest,
     weekly_summary,
 )
@@ -549,7 +550,10 @@ def cron_check(secret: str = ""):
     sent = check_and_send_reminders(CHANNEL_ACCESS_TOKEN)
     sent += check_routine_reminders(CHANNEL_ACCESS_TOKEN)
     sent += check_overdue_followup(CHANNEL_ACCESS_TOKEN)
-    return {"ok": True, "reminders_sent": sent}
+    # Piggyback the weekly summary here (reliable 5-min cron) instead of relying on a
+    # separate weekly job that can silently get disabled. Guarded to fire once/week.
+    weekly = maybe_send_weekly(CHANNEL_ACCESS_TOKEN)
+    return {"ok": True, "reminders_sent": sent, "weekly_sent": weekly}
 
 
 @app.get("/cron/morning")

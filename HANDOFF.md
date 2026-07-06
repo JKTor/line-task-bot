@@ -152,6 +152,18 @@ POST /admin/activate                → activate plan manually
   - reuse `line_handler._mark_done/_delete_task/_delete_routine` (filter user_id → ownership ปลอดภัย), redirect กลับ filter เดิม
   - `scripts/test_web_actions.py` ยืนยัน happy path + ownership (A แตะงาน B ไม่ได้) + redirect เมื่อไม่ล็อกอิน
 
+## ✅ แก้ weekly summary ไม่ทัก (2026-07-06)
+
+**อาการ:** morning digest (8 โมงทุกวัน) ทักปกติ แต่ weekly summary (จันทร์ 8 โมง) ไม่ทักเลย
+**วินิจฉัย:** โค้ด `/cron/weekly` + `weekly_summary()` ปกติดี (เคยเทสมือ sent:1) → ต้นตอคือ cron job "Weekly" บน **cron-job.org ไม่ได้ยิงเข้ามา** (น่าจะโดน auto-disable จาก fail ซ้ำ เพราะรันแค่อาทิตย์ละครั้งเลยไม่มีใครเห็น)
+**วิธีแก้ (durable):** ย้าย weekly ไปเกาะ `/cron/check` ที่ยิงทุก 5 นาที (พิสูจน์แล้วว่าเสถียร) แทน job แยกที่เปราะ
+- `scheduler.maybe_send_weekly()` — ยิง 1 ครั้ง/สัปดาห์ เฉพาะจันทร์ ≥ 08:00, กันซ้ำด้วยตาราง `app_state` (key `weekly_last_week` เก็บ ISO week `%G-W%V`), claim week ก่อน push กัน double
+- `/cron/check` เรียก `maybe_send_weekly()` เพิ่ม → response มี `weekly_sent`
+- `/cron/weekly` เดิมยังอยู่ (bypass guard = สำหรับ manual "Run now")
+- ตาราง `app_state` สร้างอัตโนมัติโดย create_all ตอน deploy
+- test: `scripts/test_weekly_guard.py` (จันทร์ส่งครั้งเดียว / อังคารไม่ส่ง / สัปดาห์หน้าส่งใหม่)
+- ⚠️ **user ควรลบ/ปิด job "LINE Task Bot Weekly" บน cron-job.org ทิ้ง** (ไม่ต้องใช้แล้ว) กันเผลอ re-enable แล้วส่งซ้ำ
+
 ## 🟡 TODO ที่ยังเหลือ
 
 - แก้ไข routine (เวลา/วัน) บนเว็บ — ตอนนี้ลบได้อย่างเดียว, แก้ต้องพิมพ์ในไลน์
