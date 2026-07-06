@@ -108,6 +108,26 @@ POST /admin/activate                → activate plan manually
 
 ---
 
+## ✅ Database: อยู่บน Postgres (Neon) แล้ว (2026-07-06)
+
+- `DATABASE_URL` ใน Render ชี้ Neon Postgres (`ap-southeast-1`, project `line-task-bot`)
+- ยืนยันจาก log ตอน boot: `[db] using sslmode=require` (branch `_is_pg`)
+- ตารางครบใน Neon: `users`, `tasks`, `routines`, `unknown_messages` — สร้างอัตโนมัติโดย `init_db()`
+- **ข้อมูลไม่หายตอน redeploy อีกต่อไป** (ปัญหา SQLite ephemeral เดิมจบแล้ว)
+- ทดสอบ connection string ใหม่ได้ด้วย `python scripts/check_db.py` (ตั้ง `DATABASE_URL` ก่อนรัน)
+- `database.py` มี warning ถ้าเผลอ deploy จริงบน SQLite
+
+---
+
+## 🔒 Auth security hardening เสร็จแล้ว (commit f8abb4e, 2026-07-06)
+
+- ตรวจ LINE OAuth `state` ที่ `/auth/callback` (กัน CSRF / login fixation)
+- cookie `Secure` อัตโนมัติบน HTTPS deploy
+- `/debug/ai` ต้องใส่ `ADMIN_SECRET`
+- warning ถ้า `JWT_SECRET` ยังเป็นค่า default ใน production
+
+---
+
 ## 🟡 TODO เพิ่มเติม (ทำทีหลังได้)
 
 ### Clarify missing info (PRD §21)
@@ -120,7 +140,6 @@ POST /admin/activate                → activate plan manually
 - รวม routine ในหน้า `/dashboard/tasks` หรือทำหน้า agenda ใหม่ที่รวม task + routine
 - เพิ่มหน้า admin ดู unknown messages ให้ใช้ง่ายขึ้น และใช้ข้อมูลนั้นปรับ prompt/parser
 - เพิ่ม tests สำหรับ parser/handler เคสภาษาไทยธรรมชาติ
-- ปรับ auth security: ตรวจ LINE OAuth `state`, ตั้ง cookie `secure=True`, และบังคับ `JWT_SECRET` ใน production
 
 ---
 
