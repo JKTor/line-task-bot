@@ -10,7 +10,7 @@ from typing import List, Optional
 import pytz
 from sqlalchemy.orm import Session
 
-from app import ai_parser
+from app import ai_parser, expense
 from app.models import PendingClarify, Routine, Task, UnknownMessage, User
 from app.parser import TZ, format_deadline, now_local, parse_task
 
@@ -39,6 +39,12 @@ HELP_TEXT = (
     "• ลบกิจวัตร <id> — ลบกิจวัตร\n"
     "• ลบกิจวัตรทั้งหมด — ลบกิจวัตรทั้งหมด\n"
     "• ช่วยเหลือ — แสดงคำสั่งทั้งหมด\n\n"
+    "💸 รายรับ-รายจ่าย:\n"
+    "• <ของ> <ราคา> — เช่น 'กาแฟ 60' บันทึกรายจ่ายทันที\n"
+    "• รับ <ที่มา> <จำนวน> — เช่น 'รับ เงินเดือน 15000'\n"
+    "• สรุป — สรุปรายจ่ายเดือนนี้แยกหมวด\n"
+    "• รายจ่ายวันนี้ / เมื่อวาน — ดูรายการรายวัน\n"
+    "• ลบรายจ่าย <id> — ลบรายการเงิน\n\n"
     "💡 พิมพ์ธรรมชาติก็ได้ เช่น 'พรุ่งนี้ส่งรายงาน 6 โมงเย็น'\n"
     "🔄 งานซ้ำ: 'ส่งรายงานทุกวันศุกร์ 5 โมงเย็น'\n"
     "🔔 กิจวัตร: 'ออกกำลังกายทุกวัน 18.00' (แจ้งเตือน ไม่ต้อง mark done)"
@@ -559,6 +565,101 @@ def _update_routine(db: Session, user_id: str, routine_id: int, updates: dict) -
     )
 
 
+# ===== Money (รายรับ-รายจ่าย) =====
+
+_SUMMARY_WORDS = ("สรุป", "สรุปรายจ่าย", "สรุปเดือนนี้", "สรุปเงิน", "สรุปรายรับรายจ่าย",
+                  "เดือนนี้ใช้ไปเท่าไหร่", "ใช้ไปเท่าไหร่", "ใช้เงินไปเท่าไหร่",
+                  "เดือนนี้จ่ายไปเท่าไหร่", "รายจ่ายเดือนนี้", "รายจ่ายเดือน")
+_TODAY_MONEY_WORDS = ("รายจ่ายวันนี้", "วันนี้จ่ายอะไรบ้าง", "วันนี้ใช้ไปเท่าไหร่",
+                      "จ่ายอะไรไปบ้าง", "รายรับวันนี้", "เงินวันนี้")
+_YESTERDAY_MONEY_WORDS = ("รายจ่ายเมื่อวาน", "เมื่อวานใช้ไปเท่าไหร่", "เงินเมื่อวาน",
+                          "รายรับเมื่อวาน")
+
+
+def _local_date_or_none(date_str) -> Optional[datetime]:
+    """'2026-08-11' → datetime ตามเวลาไทย (คงเวลาปัจจุบันไว้), ไม่ใช่รูปแบบนี้คืน None"""
+    if not isinstance(date_str, str) or len(date_str) < 10:
+        return None
+    try:
+        parsed = datetime.strptime(date_str[:10], "%Y-%m-%d")
+    except ValueError:
+        return None
+    now = now_local()
+    return TZ.localize(parsed.replace(hour=now.hour, minute=now.minute))
+
+
+def _expense_quick_reply(expense_id: int) -> list:
+    return [
+        {"label": "📊 สรุปเดือนนี้", "text": "สรุป"},
+        {"label": "📅 วันนี้", "text": "รายจ่ายวันนี้"},
+        {"label": f"🗑️ ลบ #{expense_id}", "text": f"ลบรายจ่าย {expense_id}"},
+    ]
+
+
+def _save_expense(db: Session, user_id: str, parsed: dict, force_kind: Optional[str] = None):
+    row = expense.add_expense(
+        db, user_id,
+        title=parsed["title"],
+        amount=parsed["amount"],
+        kind=force_kind or parsed["kind"],
+        category=expense.guess_category(parsed["title"], force_kind or parsed["kind"]),
+        days_offset=parsed.get("days_offset", 0),
+    )
+    return {"text": expense.format_added(db, user_id, row),
+            "quick_reply": _expense_quick_reply(row.id)}
+
+
+def _delete_expense_reply(db: Session, user_id: str, expense_id: int) -> str:
+    row = expense.delete_expense(db, user_id, expense_id)
+    if row is None:
+        return f"ไม่เจอรายการเงิน #{expense_id} ครับ"
+    return f"🗑️ ลบแล้ว: {row.title} {expense.money(row.amount)} บาท"
+
+
+def _try_expense_command(db: Session, user_id: str, text: str):
+    """คำสั่งเกี่ยวกับเงินแบบชัดเจน — ต้องเช็คก่อนคำสั่งงาน (เช่น 'ลบรายจ่าย 3' vs 'ลบ 3')"""
+    stripped = text.strip()
+    low = stripped.lower()
+
+    for prefix in ("ลบรายจ่าย", "ลบรายรับ", "ลบเงิน"):
+        if stripped.startswith(prefix):
+            rest = stripped[len(prefix):].strip().lstrip("#")
+            if rest.isdigit():
+                return _delete_expense_reply(db, user_id, int(rest))
+            return "บอก id ของรายการด้วยนะครับ เช่น 'ลบรายจ่าย 3'"
+
+    if low in _SUMMARY_WORDS or stripped in _SUMMARY_WORDS:
+        today = now_local()
+        return expense.format_month_summary(db, user_id, today.year, today.month)
+
+    if low in _TODAY_MONEY_WORDS:
+        return expense.format_day_list(db, user_id, now_local().date(), "📅 เงินวันนี้")
+
+    if low in _YESTERDAY_MONEY_WORDS:
+        yesterday = (now_local() - timedelta(days=1)).date()
+        return expense.format_day_list(db, user_id, yesterday, "📅 เงินเมื่อวาน")
+
+    # "รายจ่าย <ของ> <ราคา>" / "รายรับ <ที่มา> <จำนวน>" — ระบุชนิดชัดเจน
+    for prefix, kind in (("รายจ่าย", "expense"), ("รายรับ", "income")):
+        if stripped.startswith(prefix):
+            rest = stripped[len(prefix):].strip()
+            if not rest:
+                continue
+            parsed = expense.parse_expense(rest)
+            if parsed:
+                return _save_expense(db, user_id, parsed, force_kind=kind)
+
+    return None
+
+
+def _try_expense_add(db: Session, user_id: str, text: str):
+    """ตัวสุดท้ายของ strict pipeline — ถ้าไม่ใช่คำสั่งงานใดๆ เลย ลองอ่านเป็นเงิน"""
+    parsed = expense.parse_expense(text)
+    if not parsed:
+        return None
+    return _save_expense(db, user_id, parsed)
+
+
 # ===== Strict pattern matcher =====
 
 _THAI_TIME_WORDS = ("ทุ่ม", "บ่าย", "เย็น", "ตี ", "ตี1", "ตี2", "ตี3", "ตี4", "ตี5",
@@ -631,6 +732,11 @@ def _log_unknown(db: Session, user_id: str, text: str, ai_intent: str = "unknown
 
 def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
     lower = text.lower()
+
+    # เงินก่อน: "ลบรายจ่าย 3" ต้องไม่ตกไปเข้าเงื่อนไข "ลบ" ของงาน
+    money_cmd = _try_expense_command(db, user_id, text)
+    if money_cmd is not None:
+        return money_cmd
 
     if text.startswith("เพิ่ม") or lower.startswith("add "):
         body = text[len("เพิ่ม"):].strip() if text.startswith("เพิ่ม") else text[4:].strip()
@@ -720,7 +826,8 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
     if text in ("ช่วยเหลือ", "help", "?"):
         return HELP_TEXT
 
-    return None
+    # ท้ายสุด: ไม่ใช่คำสั่งงานเลย → ลองอ่านเป็นเงิน ("กาแฟ 60")
+    return _try_expense_add(db, user_id, text)
 
 
 # ===== AI dispatcher =====
@@ -893,6 +1000,57 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict, allow_clarify: bool = 
 
     if action == "delete_all_routines":
         return _delete_all_routines(db, user_id)
+
+    if action == "expense":
+        raw = intent.get("expenses")
+        rows = []
+        for item in (raw if isinstance(raw, list) else []):
+            if not isinstance(item, dict):
+                continue
+            title = (item.get("title") or "").strip()
+            try:
+                amount = float(item.get("amount"))
+            except (TypeError, ValueError):
+                continue
+            if not title or amount <= 0:
+                continue
+            kind = "income" if item.get("kind") == "income" else "expense"
+            rows.append(expense.add_expense(
+                db, user_id, title=title, amount=amount, kind=kind,
+                spent_at_local=_local_date_or_none(item.get("date")),
+            ))
+        if not rows:
+            return "ไม่เจอจำนวนเงินครับ ลองพิมพ์แบบ 'กาแฟ 60' ดูนะ"
+        if len(rows) == 1:
+            return {"text": expense.format_added(db, user_id, rows[0]),
+                    "quick_reply": _expense_quick_reply(rows[0].id)}
+        total = sum(r.amount for r in rows if r.kind == "expense")
+        lines = ["✅ บันทึกแล้ว %d รายการ" % len(rows), ""]
+        lines += [expense.format_entry_line(r) for r in rows]
+        lines.append("")
+        lines.append(f"รวมจ่าย {expense.money(total)} บาท")
+        return {"text": "\n".join(lines), "quick_reply": _expense_quick_reply(rows[-1].id)}
+
+    if action == "expense_summary":
+        month_str = intent.get("month")
+        target = now_local()
+        if isinstance(month_str, str) and len(month_str) >= 7:
+            try:
+                target = target.replace(year=int(month_str[:4]), month=int(month_str[5:7]), day=1)
+            except ValueError:
+                pass
+        return expense.format_month_summary(db, user_id, target.year, target.month)
+
+    if action == "expense_list":
+        when = _local_date_or_none(intent.get("date")) or now_local()
+        return expense.format_day_list(db, user_id, when.date(),
+                                       f"📅 เงินวันที่ {when.strftime('%d/%m')}")
+
+    if action == "expense_delete":
+        eid = intent.get("expense_id")
+        if isinstance(eid, int):
+            return _delete_expense_reply(db, user_id, eid)
+        return "บอก id ของรายการที่จะลบด้วยนะครับ เช่น 'ลบรายจ่าย 3'"
 
     if action == "help":
         return HELP_TEXT

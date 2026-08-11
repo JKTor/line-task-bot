@@ -174,7 +174,7 @@ def landing(request: Request, error: str = "",
     user = _get_session_user(session_token, db)
     if user:
         return RedirectResponse("/dashboard")
-    return templates.TemplateResponse("landing.html", {"request": request, "user": user, "error": error})
+    return templates.TemplateResponse(request, "landing.html", {"user": user, "error": error})
 
 
 @app.get("/health")
@@ -254,8 +254,8 @@ def dashboard(request: Request,
     if not user:
         return RedirectResponse("/auth/line")
     task_count = db.query(Task).filter_by(user_id=user.line_user_id, done=False).count()
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request, "user": user,
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "user": user,
         "task_count": task_count, "flash": flash,
     })
 
@@ -342,10 +342,81 @@ def dashboard_tasks(request: Request,
                 "days_label": "ทุกวัน" if r.days == "daily" else "บางวัน",
             })
 
-    return templates.TemplateResponse("tasks.html", {
-        "request": request, "user": user,
+    return templates.TemplateResponse(request, "tasks.html", {
+        "user": user,
         "tasks": tasks, "routines": routines, "filter": filter,
     })
+
+
+@app.get("/dashboard/expenses", response_class=HTMLResponse)
+def dashboard_expenses(request: Request,
+                       month: Optional[str] = None,
+                       session_token: Optional[str] = Cookie(default=None),
+                       db: Session = Depends(get_db)):
+    from app import expense
+    from app.parser import now_local, TZ
+    import pytz
+
+    user = _get_session_user(session_token, db)
+    if not user:
+        return RedirectResponse("/auth/line")
+
+    now = now_local()
+    year, mon = now.year, now.month
+    if month:
+        try:
+            year, mon = int(month[:4]), int(month[5:7])
+            datetime(year, mon, 1)
+        except (ValueError, IndexError):
+            year, mon = now.year, now.month
+
+    rows = expense.list_month(db, user.line_user_id, year, mon)
+    spent = sum(r.amount for r in rows if r.kind == "expense")
+    income = sum(r.amount for r in rows if r.kind == "income")
+
+    totals = {}
+    for r in rows:
+        if r.kind == "expense":
+            totals[r.category] = totals.get(r.category, 0.0) + r.amount
+    categories = [
+        {"name": name, "emoji": expense.cat_emoji(name), "total": expense.money(total),
+         "pct": round(total / spent * 100) if spent else 0}
+        for name, total in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
+    ]
+
+    entries = [{
+        "id": r.id, "title": r.title, "kind": r.kind, "category": r.category,
+        "emoji": expense.cat_emoji(r.category), "amount": expense.money(r.amount),
+        "when": pytz.utc.localize(r.spent_at).astimezone(TZ).strftime("%d/%m %H:%M"),
+    } for r in reversed(rows)]
+
+    prev_m = datetime(year, mon, 1) - timedelta(days=1)
+    next_m = datetime(year + (mon == 12), (mon % 12) + 1, 1)
+    # request-first signature — รองรับทั้ง starlette 0.38 (prod) และ 1.0 (venv ใหม่)
+    return templates.TemplateResponse(request, "expenses.html", {
+        "user": user,
+        "entries": entries, "categories": categories,
+        "spent": expense.money(spent), "income": expense.money(income),
+        "balance": expense.money(income - spent), "balance_positive": income - spent >= 0,
+        "has_income": income > 0,
+        "month_label": f"{expense.THAI_MONTHS_SHORT[mon]} {(year + 543) % 100:02d}",
+        "month": f"{year:04d}-{mon:02d}",
+        "prev_month": prev_m.strftime("%Y-%m"),
+        "next_month": next_m.strftime("%Y-%m") if next_m <= now.replace(tzinfo=None) else None,
+    })
+
+
+@app.post("/dashboard/expenses/{expense_id}/delete")
+def web_expense_delete(expense_id: int, month: str = Form(""),
+                       session_token: Optional[str] = Cookie(default=None),
+                       db: Session = Depends(get_db)):
+    from app import expense
+    user = _get_session_user(session_token, db)
+    if not user:
+        return RedirectResponse("/auth/line")
+    expense.delete_expense(db, user.line_user_id, expense_id)  # ownership-checked inside
+    suffix = f"?month={month}" if month else ""
+    return RedirectResponse(f"/dashboard/expenses{suffix}", status_code=302)
 
 
 def _tasks_redirect(filter: str) -> RedirectResponse:
@@ -400,8 +471,8 @@ def admin_panel(request: Request, secret: str = "", db: Session = Depends(get_db
     for u in users_raw:
         count = db.query(Task).filter_by(user_id=u.line_user_id, done=False).count()
         users.append({**u.__dict__, "task_count": count})
-    return templates.TemplateResponse("admin.html", {
-        "request": request, "users": users, "secret": secret,
+    return templates.TemplateResponse(request, "admin.html", {
+        "users": users, "secret": secret,
     })
 
 
@@ -443,8 +514,8 @@ def admin_unknown(request: Request, secret: str = "", resolved: bool = False,
             created = pytz.utc.localize(m.created_at).astimezone(TZ).strftime("%d/%m %H:%M")
         msgs.append({"id": m.id, "text": m.text, "ai_intent": m.ai_intent, "created_local": created})
     pending_count = db.query(UnknownMessage).filter(UnknownMessage.resolved == False).count()  # noqa: E712
-    return templates.TemplateResponse("unknown.html", {
-        "request": request, "secret": secret, "msgs": msgs,
+    return templates.TemplateResponse(request, "unknown.html", {
+        "secret": secret, "msgs": msgs,
         "resolved": resolved, "pending_count": pending_count,
     })
 

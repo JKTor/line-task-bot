@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
 
 from app.database import Base
 
@@ -64,6 +64,26 @@ class PendingClarify(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(64), unique=True, index=True, nullable=False)
     title = Column(String(500), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Expense(Base):
+    """One money entry — either spending or income.
+
+    Created by typing "กาแฟ 60" in LINE. spent_at is UTC-naive like Task.deadline;
+    always convert with parser.TZ before grouping by day/month.
+    New table → created automatically by create_all().
+    """
+    __tablename__ = "expenses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(64), index=True, nullable=False)
+    title = Column(String(200), nullable=False)
+    amount = Column(Float, nullable=False)                            # บาท, บวกเสมอ
+    kind = Column(String(10), default="expense", nullable=False)      # expense | income
+    category = Column(String(30), default="อื่นๆ", nullable=False)
+    spent_at = Column(DateTime, nullable=False)                       # UTC-naive
+    note = Column(String(300), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 

@@ -21,7 +21,7 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยแปลงข้อ�
 
 Schema:
 {
-  "intent": "add"|"clarify"|"list_today"|"list_tomorrow"|"list_week"|"list_overdue"|"list_urgent"|"list_date"|"list_all"|"search"|"done"|"delete"|"delete_all"|"done_all"|"snooze"|"cancel_recurring"|"add_note"|"set_priority"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"update_routine"|"help"|"unknown",
+  "intent": "add"|"clarify"|"list_today"|"list_tomorrow"|"list_week"|"list_overdue"|"list_urgent"|"list_date"|"list_all"|"search"|"done"|"delete"|"delete_all"|"done_all"|"snooze"|"cancel_recurring"|"add_note"|"set_priority"|"add_routine"|"list_routines"|"delete_routine"|"delete_all_routines"|"update_routine"|"expense"|"expense_summary"|"expense_list"|"expense_delete"|"help"|"unknown",
   "tasks": [{"title": "string", "deadline": "YYYY-MM-DD HH:MM" or null, "recurring": "daily"|"weekly:N"|"monthly:D"|null, "priority": "urgent"|"high"|"normal"|"low"|null, "note": "string"|null}],
   "task_id": integer or null,
   "priority": "urgent"|"high"|"normal"|"low"|null,
@@ -29,6 +29,9 @@ Schema:
   "keyword": "string"|null,
   "routine": {"title": "string", "time": "HH:MM", "days": "daily|0|0,1,2,3,4", "advance_minutes": 30},
   "routine_id": integer or null,
+  "expenses": [{"title": "string", "amount": number, "kind": "expense"|"income", "date": "YYYY-MM-DD"|null}],
+  "expense_id": integer or null,
+  "month": "YYYY-MM" or null,
   "date": "YYYY-MM-DD" or null,
   "reply": "ข้อความตอบกลับสั้นๆ (optional)"
 }
@@ -101,6 +104,22 @@ advance_minutes default=30 (แจ้งก่อน 30 นาที)
 "ตั้งงาน 5 เป็น urgent"/"งาน 2 ด่วนมาก" → {"intent":"set_priority","task_id":5,"priority":"urgent"}
 "งานด่วน ส่งสัญญาก่อนเที่ยง" → {"intent":"add","tasks":[{"title":"ส่งสัญญา","deadline":"<วันนี้> 12:00","priority":"urgent"}]}
 "จดไว้ ซื้อยา ไม่รีบ" → {"intent":"add","tasks":[{"title":"ซื้อยา","deadline":null,"priority":"low"}]}
+
+💸 กฎรายรับ-รายจ่าย (expense) — สำคัญ:
+- intent="expense" ใช้เมื่อผู้ใช้ "จ่ายไปแล้ว/ได้เงินมาแล้ว" (อดีตหรือปัจจุบัน) พร้อมจำนวนเงิน
+- ⚠️ ถ้าเป็น "อนาคต" (พรุ่งนี้ต้องจ่าย / เตือนจ่ายบิลวันที่ 5) → intent="add" (เป็นงาน) ห้ามเป็น expense
+- kind="income" เมื่อเป็นเงินเข้า (เงินเดือน/ขายของ/ได้เงิน/รับมา), นอกนั้น "expense"
+- amount เป็นตัวเลขล้วน ไม่มีคอมม่า ไม่มีหน่วย
+- date = null ถ้าหมายถึงวันนี้
+ตัวอย่าง:
+"เมื่อวานจ่ายค่าไฟ 800" → {"intent":"expense","expenses":[{"title":"ค่าไฟ","amount":800,"kind":"expense","date":"<เมื่อวาน>"}]}
+"วันนี้กินข้าว 60 กับกาแฟ 45" → {"intent":"expense","expenses":[{"title":"ข้าว","amount":60,"kind":"expense","date":null},{"title":"กาแฟ","amount":45,"kind":"expense","date":null}]}
+"เงินเดือนออก 15000" → {"intent":"expense","expenses":[{"title":"เงินเดือน","amount":15000,"kind":"income","date":null}]}
+"พรุ่งนี้ต้องจ่ายค่าเน็ต 599" → {"intent":"add","tasks":[{"title":"จ่ายค่าเน็ต 599","deadline":"<พรุ่งนี้> 23:59"}]}
+"เดือนนี้ใช้เงินไปเท่าไหร่"/"สรุปรายจ่าย" → {"intent":"expense_summary","month":null}
+"สรุปรายจ่ายเดือนที่แล้ว" → {"intent":"expense_summary","month":"<เดือนที่แล้ว YYYY-MM>"}
+"รายจ่ายวันที่ 5"/"เมื่อวานจ่ายอะไรบ้าง" → {"intent":"expense_list","date":"YYYY-MM-DD"}
+"ลบรายจ่ายที่ 3" → {"intent":"expense_delete","expense_id":3}
 
 ตัวอย่าง routines:
 "ออกกำลังกายทุกวัน 18:00" → {"intent":"add_routine","routine":{"title":"ออกกำลังกาย","time":"18:00","days":"daily","advance_minutes":30}}

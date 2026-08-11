@@ -164,6 +164,22 @@ POST /admin/activate                → activate plan manually
 - test: `scripts/test_weekly_guard.py` (จันทร์ส่งครั้งเดียว / อังคารไม่ส่ง / สัปดาห์หน้าส่งใหม่)
 - ⚠️ **user ควรลบ/ปิด job "LINE Task Bot Weekly" บน cron-job.org ทิ้ง** (ไม่ต้องใช้แล้ว) กันเผลอ re-enable แล้วส่งซ้ำ
 
+## ✅ รายรับ-รายจ่ายในไลน์ (2026-08-12) — ยังไม่ deploy
+
+พิมพ์ `กาแฟ 60` ในไลน์ = บันทึกรายจ่ายทันที (ดูรายละเอียดเต็มใน CHANGELOG)
+
+- ไฟล์ใหม่: `app/expense.py`, `app/templates/expenses.html`, `scripts/test_expense.py`
+- แก้: `models.py` (+`Expense`), `line_handler.py` (คำสั่งเงิน + AI dispatch + HELP), `ai_parser.py` (4 intents), `main.py` (2 routes), `tasks.html`/`dashboard.html` (เมนู)
+- ตาราง `expenses` สร้างเองตอน deploy ผ่าน `create_all` — ไม่ต้อง migrate มือ
+- เทส: `venv\Scripts\python.exe scripts\test_expense.py` (57 เคส) + `scripts\test_web_pages.py` (ทุกหน้า) + ชุดเดิมทั้ง 4 → ผ่านหมด
+- **ยังไม่ได้ลองในไลน์จริง** — deploy แล้วให้ user ลองพิมพ์ "กาแฟ 60" / "สรุป" ในแอป LINE
+
+### ✅ แก้แล้ว: TemplateResponse รูปแบบเก่าจะพังกับ starlette ใหม่
+venv เครื่อง dev หลุดจาก `requirements.txt` (มี fastapi 0.136 / starlette 1.0 แต่ pin ไว้ 0.115 / starlette 0.38)
+starlette 1.0 **เลิกรองรับ** `TemplateResponse("name.html", {...})` แบบเก่า → รันเว็บ local หน้าเดิมจะ 500 (prod ไม่พัง)
+แก้ทั้ง 6 หน้าเป็น `TemplateResponse(request, "name.html", {...})` แล้ว — รูปแบบนี้ starlette 0.38 (prod) ก็รองรับ ยืนยันจาก source ของ 0.38.6 แล้ว
+กันพลาดซ้ำด้วย `scripts/test_web_pages.py` — render ทุกหน้าจริงผ่าน TestClient ถ้ามีใครเผลอเขียนแบบเก่าจะจับได้ทันที
+
 ## 🟡 TODO ที่ยังเหลือ
 
 - แก้ไข routine (เวลา/วัน) บนเว็บ — ตอนนี้ลบได้อย่างเดียว, แก้ต้องพิมพ์ในไลน์
