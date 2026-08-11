@@ -163,6 +163,46 @@ def test_ownership(db):
           db.query(Expense).filter(Expense.id == other.id).first() is not None)
 
 
+def test_id_collision(db):
+    """งานกับรายการเงินนับ id คนละชุด — 'ลบ 3' เคยลบงานทิ้งทั้งที่ผู้ใช้ตั้งใจลบรายจ่าย"""
+    print("\n[flow] id ชนกันระหว่างงานกับเงิน")
+    u = "U_collision"
+    # จองเลขที่ยังว่างทั้งสองตาราง แล้วยัดให้งานกับรายจ่ายใช้เลขเดียวกัน
+    free_id = max(
+        db.query(Task).count() + db.query(Expense).count() + 100,
+        (db.query(Task).order_by(Task.id.desc()).first().id if db.query(Task).count() else 0) + 100,
+    )
+    task = Task(id=free_id, user_id=u, title="งานชนเลข")
+    same = Expense(id=free_id, user_id=u, title="กาแฟชนเลข", amount=60,
+                   kind="expense", category="อาหาร",
+                   spent_at=expense._to_utc_naive(now_local()))
+    db.add_all([task, same])
+    db.commit()
+
+    res = reply_text(lh.handle_command(db, u, f"ลบ {task.id}"))
+    check("'ลบ <id>' ที่ชนกัน → ถามก่อน", "จะลบอันไหน" in res)
+    check("ยังไม่ลบงาน", db.query(Task).filter_by(id=task.id).first() is not None)
+    check("ยังไม่ลบรายจ่าย", db.query(Expense).filter_by(id=same.id).first() is not None)
+
+    res = reply_text(lh.handle_command(db, u, f"ลบงาน {task.id}"))
+    check("'ลบงาน <id>' ลบเฉพาะงาน", "ลบงานแล้ว" in res)
+    check("งานถูกลบ", db.query(Task).filter_by(id=task.id).first() is None)
+    check("รายจ่ายยังอยู่", db.query(Expense).filter_by(id=same.id).first() is not None)
+
+    summary = reply_text(lh.handle_command(db, u, "สรุป"))
+    check("สรุปยังนับรายจ่าย 60 อยู่ (ยังไม่ได้ลบ)", "60" in summary)
+
+    # ตอนนี้เหลือแค่รายจ่ายที่เลขนี้ → 'ลบ <id>' ต้องเข้าใจว่าหมายถึงเงิน
+    res = reply_text(lh.handle_command(db, u, f"ลบ {same.id}"))
+    check("'ลบ <id>' ที่มีแต่รายการเงิน → ลบเงินให้เลย", "ลบแล้ว" in res)
+    check("รายจ่ายถูกลบจริง", db.query(Expense).filter_by(id=same.id).first() is None)
+
+    # ลบหมดแล้ว → ต้องได้ข้อความ "ยังไม่มีรายการ"
+    # (เช็คว่าไม่มีเลข 60 ไม่ได้ เพราะข้อความตัวอย่างในนั้นมีคำว่า "กาแฟ 60")
+    summary = reply_text(lh.handle_command(db, u, "สรุป"))
+    check("สรุปไม่รวมรายการที่ลบแล้ว", "ยังไม่มีรายการ" in summary)
+
+
 def test_web(db):
     print("\n[web] หน้า /dashboard/expenses")
     from app import main as web
@@ -208,6 +248,7 @@ def main():
         test_flow(db)
         test_task_still_works(db)
         test_ownership(db)
+        test_id_collision(db)
         test_web(db)
     finally:
         db.close()

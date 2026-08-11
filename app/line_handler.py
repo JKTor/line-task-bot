@@ -11,7 +11,7 @@ import pytz
 from sqlalchemy.orm import Session
 
 from app import ai_parser, expense
-from app.models import PendingClarify, Routine, Task, UnknownMessage, User
+from app.models import Expense, PendingClarify, Routine, Task, UnknownMessage, User
 from app.parser import TZ, format_deadline, now_local, parse_task
 
 # How long a "waiting for the user to supply a date" state stays valid.
@@ -33,7 +33,7 @@ HELP_TEXT = (
     "• อาทิตย์นี้ — ดูงาน 7 วันข้างหน้า\n"
     "• ทั้งหมด — ดูงานที่ยังไม่เสร็จทั้งหมด\n"
     "• เสร็จ <id> — ทำเครื่องหมายเสร็จ\n"
-    "• ลบ <id> — ลบงาน\n"
+    "• ลบงาน <id> — ลบงาน (พิมพ์ 'ลบ <id>' ก็ได้)\n"
     "• ยกเลิกซ้ำ <id> — หยุดการทำซ้ำ\n"
     "• กิจวัตร — ดูกิจวัตรประจำวัน\n"
     "• ลบกิจวัตร <id> — ลบกิจวัตร\n"
@@ -205,7 +205,7 @@ def _task_quick_reply(task_id: int) -> list:
     return [
         {"label": f"✅ เสร็จ #{task_id}", "text": f"เสร็จ {task_id}"},
         {"label": f"📅 เลื่อน #{task_id}", "text": f"เลื่อนงาน {task_id}"},
-        {"label": f"🗑️ ลบ #{task_id}", "text": f"ลบ {task_id}"},
+        {"label": f"🗑️ ลบ #{task_id}", "text": f"ลบงาน {task_id}"},
     ]
 
 
@@ -429,9 +429,10 @@ def _delete_task(db: Session, user_id: str, task_id: int) -> str:
     task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
     if not task:
         return f"ไม่เจองาน #{task_id}"
+    title = task.title
     db.delete(task)
     db.commit()
-    return f"🗑️ ลบแล้ว: #{task_id}"
+    return f"🗑️ ลบงานแล้ว: #{task_id} {title}"
 
 
 def _delete_all(db: Session, user_id: str) -> str:
@@ -652,6 +653,28 @@ def _try_expense_command(db: Session, user_id: str, text: str):
     return None
 
 
+def _delete_smart(db: Session, user_id: str, item_id: int) -> str:
+    """'ลบ 3' — งานกับรายการเงินนับ id คนละชุด เลขจึงซ้ำกันได้
+
+    ถ้าซ้ำต้องถามก่อน ห้ามเดา: เคยเจอเคสผู้ใช้ตั้งใจลบรายจ่ายแต่บอทลบงานให้
+    แล้วตอบว่า "ลบแล้ว" — รายจ่ายยังอยู่ในสรุป ส่วนงานหายไปเงียบๆ
+    """
+    task = db.query(Task).filter_by(id=item_id, user_id=user_id).first()
+    money = db.query(Expense).filter_by(id=item_id, user_id=user_id).first()
+
+    if task is not None and money is not None:
+        return (
+            f"เลข #{item_id} มีทั้งสองอย่างครับ จะลบอันไหน?\n"
+            f"📋 งาน: {task.title}\n"
+            f"{expense.cat_emoji(money.category)} เงิน: {money.title} "
+            f"{expense.money(money.amount)} บาท\n\n"
+            f"พิมพ์ \"ลบงาน {item_id}\" หรือ \"ลบรายจ่าย {item_id}\""
+        )
+    if money is not None:
+        return _delete_expense_reply(db, user_id, item_id)
+    return _delete_task(db, user_id, item_id)
+
+
 def _try_expense_add(db: Session, user_id: str, text: str):
     """ตัวสุดท้ายของ strict pipeline — ถ้าไม่ใช่คำสั่งงานใดๆ เลย ลองอ่านเป็นเงิน"""
     parsed = expense.parse_expense(text)
@@ -806,6 +829,12 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
     if text in ("กิจวัตร", "กิจวัตรของฉัน", "routine", "routines"):
         return _list_routines(db, user_id)
 
+    if text.startswith("ลบงาน"):
+        rest = text[len("ลบงาน"):].strip().lstrip("#")
+        if rest.isdigit():
+            return _delete_task(db, user_id, int(rest))
+        return None
+
     if text.startswith("ลบ") or lower.startswith("del ") or lower.startswith("delete "):
         if text.startswith("ลบ"):
             rest = text[len("ลบ"):].strip()
@@ -813,8 +842,9 @@ def _try_strict(db: Session, user_id: str, text: str) -> Optional[str]:
             rest = text[4:].strip()
         else:
             rest = text[7:].strip()
+        rest = rest.lstrip("#")
         if rest.isdigit():
-            return _delete_task(db, user_id, int(rest))
+            return _delete_smart(db, user_id, int(rest))
         return None
 
     if text.startswith("ยกเลิกซ้ำ"):
@@ -946,7 +976,7 @@ def _dispatch_ai(db: Session, user_id: str, intent: dict, allow_clarify: bool = 
     if action == "delete":
         tid = intent.get("task_id")
         if isinstance(tid, int):
-            return _delete_task(db, user_id, tid)
+            return _delete_smart(db, user_id, tid)
         return "บอก id งานที่จะลบด้วยนะครับ เช่น 'ลบ 3'"
 
     if action == "delete_all":
