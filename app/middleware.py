@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.models import Task, User
 from app.auth import is_plan_active
 
-APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
+from app.config import APP_BASE_URL
 
 FREE_MAX_TASKS = 30  # active (undone) tasks
 

@@ -32,7 +32,7 @@ if _is_pg:
 else:
     # SQLite is fine for local dev, but on a hosted (non-localhost) deploy it means
     # the DB lives on ephemeral disk → data is wiped on every redeploy/restart.
-    _base_url = os.getenv("APP_BASE_URL", "http://localhost:8000")
+    from app.config import APP_BASE_URL as _base_url
     if "localhost" not in _base_url and "127.0.0.1" not in _base_url:
         print(
             "[db] WARNING: running on SQLite in what looks like a production deploy "

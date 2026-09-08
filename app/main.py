@@ -22,6 +22,7 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from sqlalchemy.orm import Session
 
+from app.config import APP_BASE_URL
 from app.database import get_db, init_db
 from app.line_handler import handle_command
 from app.models import Routine, Task, UnknownMessage, User
@@ -63,7 +64,6 @@ CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
 CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 CRON_SECRET = os.getenv("CRON_SECRET", "")
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
-APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
 ENABLE_INTERNAL_SCHEDULER = os.getenv("ENABLE_INTERNAL_SCHEDULER", "").lower() == "true"
 
 # On a real (HTTPS) deploy, cookies must be Secure. Detected from APP_BASE_URL so

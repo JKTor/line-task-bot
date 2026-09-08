@@ -14,7 +14,7 @@ from app.models import User
 
 LINE_LOGIN_CLIENT_ID = os.getenv("LINE_LOGIN_CLIENT_ID", "")
 LINE_LOGIN_SECRET = os.getenv("LINE_LOGIN_SECRET", "")
-APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
+from app.config import APP_BASE_URL
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 30
