@@ -104,6 +104,11 @@ class TasksIn(BaseModel):
     items: List[TaskIn]
 
 
+class PlanPatch(BaseModel):
+    plan: str = "pro"
+    days: int = 0                                # 0 = ไม่หมดอายุ
+
+
 class TaskPatch(BaseModel):
     user_id: Optional[str] = None
     title: Optional[str] = None
@@ -137,6 +142,28 @@ def list_users(db: Session = Depends(get_db)):
         {"line_user_id": u.line_user_id, "display_name": u.display_name, "plan": u.plan}
         for u in users
     ]}
+
+
+@router.patch("/users/{line_user_id}/plan", dependencies=[Depends(require_key)])
+def set_plan(line_user_id: str, payload: PlanPatch, db: Session = Depends(get_db)):
+    """Lift the free 30-task cap for the bot's owner.
+
+    Same effect as the /admin/activate form, reachable with the API key instead
+    of ADMIN_SECRET. days=0 means no expiry.
+    """
+    if payload.plan not in ("free", "pro", "team"):
+        raise HTTPException(422, f"bad plan: {payload.plan}")
+    user = db.query(User).filter_by(line_user_id=line_user_id).first()
+    if not user:
+        raise HTTPException(404, f"user {line_user_id} not found")
+    user.plan = payload.plan
+    user.plan_expires_at = (
+        datetime.utcnow() + timedelta(days=payload.days) if payload.days > 0 else None
+    )
+    db.commit()
+    db.refresh(user)
+    return {"ok": True, "line_user_id": user.line_user_id, "plan": user.plan,
+            "expires_at": user.plan_expires_at.isoformat() if user.plan_expires_at else None}
 
 
 @router.get("/tasks", dependencies=[Depends(require_key)])

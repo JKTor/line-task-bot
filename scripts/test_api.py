@@ -21,7 +21,7 @@ os.environ.pop("CRON_SECRET", None)
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.database import SessionLocal, init_db  # noqa: E402
-from app.models import User  # noqa: E402
+from app.models import Task, User  # noqa: E402
 from app.parser import TZ, now_local  # noqa: E402
 
 init_db()
@@ -133,6 +133,34 @@ check("delete -> 200", r.status_code == 200 and r.json()["deleted"] == ids["ง�
 check("gone from today", titles("today") == set())
 check("delete again -> 404",
       client.delete(f"/api/tasks/{ids['งานวันนี้ทั้งวัน']}", headers=KEY).status_code == 404)
+
+print("\n== plan (lifts the free 30-task cap) ==")
+from app.middleware import FREE_MAX_TASKS, check_can_add_task  # noqa: E402
+
+db = SessionLocal()
+db.add_all([Task(user_id="U_test_1", title=f"filler {i}") for i in range(FREE_MAX_TASKS)])
+db.commit()
+check("free user hits the cap", check_can_add_task(db, "U_test_1")["ok"] is False)
+db.close()
+
+r = client.patch("/api/users/U_test_1/plan", headers=KEY, json={"plan": "pro", "days": 0})
+check("set pro -> 200", r.status_code == 200 and r.json()["plan"] == "pro", r.text)
+check("days=0 -> no expiry", r.json()["expires_at"] is None)
+db = SessionLocal()
+check("pro user is past the cap", check_can_add_task(db, "U_test_1")["ok"] is True)
+db.close()
+check("bad plan -> 422",
+      client.patch("/api/users/U_test_1/plan", headers=KEY, json={"plan": "vip"}).status_code == 422)
+check("unknown user -> 404",
+      client.patch("/api/users/U_nope/plan", headers=KEY, json={"plan": "pro"}).status_code == 404)
+check("no key -> 401",
+      client.patch("/api/users/U_test_1/plan", json={"plan": "pro"}).status_code == 401)
+
+db = SessionLocal()
+for t in db.query(Task).filter(Task.title.like("filler %")).all():
+    db.delete(t)
+db.commit()
+db.close()
 
 print("\n== LINE still reads the same rows ==")
 from app.line_handler import handle_command  # noqa: E402
