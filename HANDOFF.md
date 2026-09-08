@@ -5,6 +5,27 @@
 
 ---
 
+## 🔴 บทเรียน: APP_BASE_URL ค้างชื่อเก่า ทำหน้าเว็บ 400 (2026-09-09)
+
+`/dashboard/tasks` ตอบ 400 — ที่จริงมันไม่ได้พังเอง แต่ redirect ไป `/auth/line` แล้ว **LINE** ตอบ 400
+เพราะ `APP_BASE_URL` บน Render ยังเป็น `https://line-task-bot.onrender.com` (ชื่อเก่า ตอนนี้ 404)
+ส่วนของจริงคือ `https://line-task-bot-u5vn.onrender.com` → `redirect_uri` ที่ยิงไป LINE เลยชี้โฮสต์ที่ไม่มีอยู่
+
+**ตัวแปรเดียวถูกอ่านโดย 4 โมดูล** (`auth`, `main`, `middleware`, `database`) ผิดที่เดียวจึงพังหลายที่พร้อมกัน:
+`redirect_uri` · ลิงก์อัพเกรดในข้อความบอท · การตัดสินใจ Secure cookie · และ self-ping `/health`
+(ตัว self-ping ทำงานเฉพาะตอน `ENABLE_INTERNAL_SCHEDULER=true` เท่านั้น ถ้าปิดอยู่บั๊กนี้จะหลับอยู่เฉยๆ)
+
+**แก้:** เพิ่ม `app/config.py` — รวมที่เดียว และ **เชื่อ `RENDER_EXTERNAL_URL` ก่อน** (Render ใส่ให้เอง
+เปลี่ยนชื่อ service แล้วก็ยังตรงเสมอ) `APP_BASE_URL` เหลือเป็น override สำหรับที่อื่น
+ถ้าสองค่าไม่ตรงจะ log `[config] ignoring APP_BASE_URL=...` ให้เห็นใน deploy log
+เทส `scripts/test_config.py` (7 เคส) · commit `b92e4f5`
+
+**ยังควรทำ:** ลบ/แก้ `APP_BASE_URL` บน Render dashboard ให้ตรงด้วย (ตอนนี้โค้ดข้ามให้แล้วแต่ค่าค้างไว้จะสับสน)
+ส่วนฝั่ง LINE Login console ตรวจแล้ว — callback `https://line-task-bot-u5vn.onrender.com/auth/callback`
+ลงทะเบียนไว้ถูกอยู่แล้ว (ยิง authorize แล้วได้ 302 ไปหน้า login ไม่ใช่ 400)
+
+---
+
 ## 🆕 JSON API สำหรับวางแผนจากนอกไลน์ (2026-09-09)
 
 ให้ Claude Code เขียนแผนลง DB ตัวเดียวกับที่ไลน์อ่าน — พิมพ์แผนกับ Claude แล้วถามในไลน์ได้เลย
