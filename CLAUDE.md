@@ -13,6 +13,7 @@
 - `parser.py` — แยกวันเวลาไทยด้วย regex (ตัวหลัก), `ai_parser.py` — fallback ผ่าน Gemini/Groq
 - `scheduler.py` — เช็ค quiet hours ก่อนส่ง reminder (รองรับช่วงข้ามเที่ยงคืน 22:00–08:00)
 - `auth.py` — LINE Login OAuth + JWT cookie 30 วัน, `notion_sync.py` — sync ไป Notion (pro user เท่านั้น)
+- `api.py` — JSON API `/api/*` สำหรับเขียน/อ่านแผนจากนอกไลน์ (Claude Code) กันด้วย header `X-API-Key` = `API_SECRET` (ไม่ตั้งจะ fallback ไป `CRON_SECRET`) — เขียนลงตาราง `tasks` ตัวเดียวกับที่ไลน์อ่าน จงใจ **ไม่** บังคับโควตา free 30 task เพราะคีย์นี้เป็นของเจ้าของบอท
 - `templates/` — Jinja2 (landing, dashboard, tasks, admin)
 - DB: Postgres บน Render (SQLAlchemy) — local dev ใช้ `.env` ชี้ DATABASE_URL
 
@@ -26,7 +27,15 @@ venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 venv\Scripts\python.exe scripts\test_parser_th.py
 venv\Scripts\python.exe scripts\test_clarify.py
 venv\Scripts\python.exe scripts\test_weekly_guard.py
+venv\Scripts\python.exe scripts\test_api.py   # /api/* (35 เคส ผ่าน TestClient)
 venv\Scripts\python.exe scripts\check_db.py   # ดูข้อมูลใน DB
+```
+
+จัดการแผนจากเครื่อง (เรียก API บน prod, stdlib ล้วน ไม่ต้อง venv):
+
+```powershell
+python C:\Users\data2\.claude\plan.py list tomorrow
+python C:\Users\data2\.claude\plan.py add "ส่งงาน" --date 2026-09-12 --time 16:00 --pri high
 ```
 
 venv อยู่ที่ `venv/` (ไม่ใช่ `.venv`) — ใช้ `venv\Scripts\python.exe` เสมอ

@@ -5,6 +5,26 @@
 
 ---
 
+## 🆕 JSON API สำหรับวางแผนจากนอกไลน์ (2026-09-09)
+
+ให้ Claude Code เขียนแผนลง DB ตัวเดียวกับที่ไลน์อ่าน — พิมพ์แผนกับ Claude แล้วถามในไลน์ได้เลย
+
+- ไฟล์ `app/api.py`, ต่อเข้า `main.py` แบบ try/except (พังแล้วต้องไม่ลาก webhook ตาย)
+- Auth: header `X-API-Key` = `API_SECRET` **ถ้าไม่ตั้งจะ fallback ไป `CRON_SECRET`**
+  (ยืนยันแล้วว่า `CRON_SECRET` ใน `.env` เครื่อง = ตัวเดียวกับบน Render → ใช้ได้เลยไม่ต้องเพิ่ม env var)
+- Routes: `GET /api/users` · `GET /api/tasks?scope=today|tomorrow|week|backlog|overdue|dated|done|all`
+  · `POST /api/tasks` (bulk ≤100) · `PATCH /api/tasks/{id}` · `DELETE /api/tasks/{id}` · `GET /api/routines`
+- `user_id` ไม่ต้องส่งถ้ามี user คนเดียวใน DB (resolve ให้เอง) — ถ้ามีหลายคนจะ 400 บังคับให้ระบุ
+- เวลาที่รับ/คืนเป็น **เวลาไทย** (`YYYY-MM-DD` = 23:59 ของวันนั้น) แต่ใน DB ยังเป็น UTC-naive เหมือนเดิม
+- `PATCH` ที่เปลี่ยน deadline จะรีเซ็ต `notified=False` ให้ เพื่อให้ reminder ยิงตามเวลาใหม่
+- **จงใจไม่บังคับโควตา free 30 task** — คีย์นี้เป็นของเจ้าของบอท ไม่ใช่ลูกค้า
+- ฝั่งไลน์ไม่ต้องแก้อะไรเลย: `วันนี้` / `พรุ่งนี้` / `สัปดาห์นี้` / `ด่วน` / `ทั้งหมด` เห็นงานที่ API เขียนทันที
+  (`_list_all` เรียง `deadline.is_(None)` ไว้ท้าย → งานค้างไม่มีวันก็โผล่ใน `ทั้งหมด`)
+- เทส: `scripts/test_api.py` (35 เคส รวม auth, tz, scope, ownership 404, และเช็คว่า `handle_command` อ่านแถวเดียวกันเจอ)
+- ตัวเรียกฝั่งเครื่อง: `C:\Users\data2\.claude\plan.py` + skill `~/.claude/skills/plan/` (นอก repo)
+
+---
+
 ## ✅ เสร็จทั้งหมดแล้ว (commit af0d428)
 
 ### สิ่งที่ทำเสร็จ

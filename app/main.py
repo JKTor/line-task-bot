@@ -72,6 +72,15 @@ _COOKIE_SECURE = APP_BASE_URL.startswith("https://")
 
 app = FastAPI(title="LINE Task Bot")
 
+# JSON API for planning from outside LINE (Claude Code). Optional — a failure here
+# must never take the LINE webhook down.
+try:
+    from app.api import router as api_router
+    app.include_router(api_router)
+    print("[startup] JSON API: enabled at /api")
+except Exception as _e:
+    print(f"[startup] JSON API disabled: {_e}")
+
 parser = WebhookParser(CHANNEL_SECRET) if CHANNEL_SECRET else None
 line_config = Configuration(access_token=CHANNEL_ACCESS_TOKEN) if CHANNEL_ACCESS_TOKEN else None
 
