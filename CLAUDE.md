@@ -9,7 +9,13 @@
 ## โครงสร้าง (`app/`)
 
 - `main.py` — FastAPI: webhook LINE, เว็บ dashboard, `/cron/check` (ตัวส่ง reminder ทุกประเภทรวมถึง weekly summary — ยิงโดย cron ภายนอกด้วย `CRON_SECRET`)
-- `line_handler.py` — logic ตอบข้อความ LINE ทั้งหมด (คำสั่ง เพิ่ม/เสร็จ/เลื่อน/ลบ, quick reply, subscription gating free 30 task)
+- `handlers/` — logic ตอบข้อความ LINE ทั้งหมด (เดิมเป็นไฟล์เดียว `line_handler.py` 1,133 บรรทัด แยกเมื่อ 11 ก.ย. 69)
+  - `router.py` — **ทางเข้า เริ่มอ่านที่นี่** ตัดสินว่าส่งข้อความไปชั้นไหน + จัดการสถานะรอคำตอบ
+  - `strict.py` ชั้น 1 จับ pattern (ข้อความส่วนใหญ่จบตรงนี้ ไม่เรียก AI) · `ai_dispatch.py` ชั้น 2 แปลง intent จาก AI เป็นการกระทำ
+  - `tasks.py` งาน · `routines.py` กิจวัตร · `money.py` รายรับ-รายจ่าย (+ `_delete_smart` จุดที่ id งานกับเงินชนกัน)
+  - `clarify.py` สถานะถามกลับ + log ข้อความที่อ่านไม่ออก · `formatting.py` แปลงข้อมูลเป็นข้อความ (ไม่แตะ DB) · `constants.py` ข้อความคงที่
+  - ทิศทาง import เป็นทางเดียวเสมอ router → strict/ai_dispatch → tasks → routines → formatting → constants
+- `line_handler.py` — เหลือเป็นหน้ากากบางๆ re-export จาก `handlers/` ให้ของเดิมที่ `import app.line_handler` ยังใช้ได้ (โค้ดใหม่ให้ import จาก `app.handlers`)
 - `parser.py` — แยกวันเวลาไทยด้วย regex (ตัวหลัก), `ai_parser.py` — fallback ผ่าน Gemini/Groq
 - `scheduler.py` — เช็ค quiet hours ก่อนส่ง reminder (รองรับช่วงข้ามเที่ยงคืน 22:00–08:00)
 - `auth.py` — LINE Login OAuth + JWT cookie 30 วัน, `notion_sync.py` — sync ไป Notion (pro user เท่านั้น)

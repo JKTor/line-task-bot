@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.config import APP_BASE_URL
 from app.database import get_db, init_db
-from app.line_handler import handle_command
+from app.handlers import handle_command
 from app.models import Routine, Task, UnknownMessage, User
 from app.scheduler import (
     check_and_send_reminders,
@@ -437,11 +437,11 @@ def _tasks_redirect(filter: str) -> RedirectResponse:
 def web_task_done(task_id: int, filter: str = Form("all"),
                   session_token: Optional[str] = Cookie(default=None),
                   db: Session = Depends(get_db)):
-    from app import line_handler
+    from app.handlers import tasks as task_cmds
     user = _get_session_user(session_token, db)
     if not user:
         return RedirectResponse("/auth/line")
-    line_handler._mark_done(db, user.line_user_id, task_id)  # ownership-checked inside
+    task_cmds._mark_done(db, user.line_user_id, task_id)  # ownership-checked inside
     return _tasks_redirect(filter)
 
 
@@ -449,11 +449,11 @@ def web_task_done(task_id: int, filter: str = Form("all"),
 def web_task_delete(task_id: int, filter: str = Form("all"),
                     session_token: Optional[str] = Cookie(default=None),
                     db: Session = Depends(get_db)):
-    from app import line_handler
+    from app.handlers import tasks as task_cmds
     user = _get_session_user(session_token, db)
     if not user:
         return RedirectResponse("/auth/line")
-    line_handler._delete_task(db, user.line_user_id, task_id)
+    task_cmds._delete_task(db, user.line_user_id, task_id)
     return _tasks_redirect(filter)
 
 
@@ -461,11 +461,11 @@ def web_task_delete(task_id: int, filter: str = Form("all"),
 def web_routine_delete(routine_id: int, filter: str = Form("all"),
                        session_token: Optional[str] = Cookie(default=None),
                        db: Session = Depends(get_db)):
-    from app import line_handler
+    from app.handlers import routines as routine_cmds
     user = _get_session_user(session_token, db)
     if not user:
         return RedirectResponse("/auth/line")
-    line_handler._delete_routine(db, user.line_user_id, routine_id)
+    routine_cmds._delete_routine(db, user.line_user_id, routine_id)
     return _tasks_redirect(filter)
 
 
